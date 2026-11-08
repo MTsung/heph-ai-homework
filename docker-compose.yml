@@ -1,0 +1,253 @@
+name: chat-app
+
+# 所有 Bun 服務共用的設定
+x-bun: &bun
+  image: chat-app/backend:local
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  stop_grace_period: 35s # 滾動更新時讓進行中的 AI 回覆有時間收尾(chat 會等最多 20 秒)
+  init: true
+  environment: &bun-env
+    NODE_ENV: ${NODE_ENV:-development}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    REDIS_URL: redis://redis-state:6379
+    REDIS_CACHE_URL: redis://redis-cache:6379
+    INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token-change-me}
+    JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
+    AUTH_URL: http://auth:3001
+    CHARACTER_URL: http://character:3002
+    CHAT_URL: http://chat:3003
+    BILLING_URL: http://billing:3004
+
+x-infra-ready: &infra-ready
+  postgres:
+    condition: service_healthy
+  redis-state:
+    condition: service_healthy
+  redis-cache:
+    condition: service_healthy
+
+services:
+  # =========================================================================== 對外
+  # 唯一對外入口:驗證 JWT + 單一裝置檢查、限流、轉發(含 SSE 串流)
+  gateway:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: gateway
+      PORT: "8080"
+      # 限流(每分鐘)。壓測時可用環境變數放寬,例如 RL_AUTH_PER_IP_PER_MIN=100000
+      RL_AUTH_PER_IP_PER_MIN: ${RL_AUTH_PER_IP_PER_MIN:-30}
+      RL_USER_PER_MIN: ${RL_USER_PER_MIN:-600}
+      RL_SEND_PER_USER_PER_MIN: ${RL_SEND_PER_USER_PER_MIN:-30}
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *infra-ready
+      auth: { condition: service_healthy }
+      chat: { condition: service_healthy }
+      billing: { condition: service_healthy }
+      character: { condition: service_healthy }
+    healthcheck: &hc8080
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 簡易後台(無權限控管!只綁定本機 127.0.0.1)
+  admin:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: admin
+      PORT: "8090"
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      <<: *infra-ready
+      auth: { condition: service_healthy }
+      chat: { condition: service_healthy }
+      billing: { condition: service_healthy }
+      character: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # =========================================================================== 內部服務(不對外開放埠)
+  auth:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: auth
+      PORT: "3001"
+      DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/auth
+    depends_on: *infra-ready
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  character:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: character
+      PORT: "3002"
+      DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/character
+    depends_on: *infra-ready
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  billing:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: billing
+      PORT: "3004"
+      DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/billing
+      SIGNUP_BONUS: ${SIGNUP_BONUS:-200}
+      # 連線池大小要和 Postgres max_connections(300)一起算:
+      # billing 40 + chat 40×最多 3 replica + auth 10 + character 10 ≈ 180 < 300
+      PG_POOL_MAX: ${BILLING_PG_POOL_MAX:-40}
+    depends_on: *infra-ready
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3004/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  chat:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: chat
+      PORT: "3003"
+      DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/chat
+      # --- LLM:預設 mock,沒有任何 API key 也能完整聊天 ---
+      # LLM_PROVIDERS 是有序清單:第一個是主要,其餘依序備援(例如 gemini,groq)。
+      # 每個供應商的金鑰/模型用大寫名稱當前綴(GEMINI_API_KEY、GROQ_API_KEY…)。範例見 .env.example
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-}
+      GEMINI_THINKING: ${GEMINI_THINKING:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # --- 成本控制(輸入與輸出都要設上限)與備援參數;空白 = 用程式內的預設值 ---
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-}
+      CONTEXT_MESSAGES: ${CONTEXT_MESSAGES:-}
+      CONTEXT_CHARS: ${CONTEXT_CHARS:-}
+      CONTEXT_MSG_MAX_CHARS: ${CONTEXT_MSG_MAX_CHARS:-}
+      USER_MESSAGE_MAX_CHARS: ${USER_MESSAGE_MAX_CHARS:-}
+      LLM_ATTEMPT_FIRST_TOKEN_MS: ${LLM_ATTEMPT_FIRST_TOKEN_MS:-}
+      LLM_STALL_MS: ${LLM_STALL_MS:-}
+      LLM_BREAKER_FAILURES: ${LLM_BREAKER_FAILURES:-}
+      LLM_BREAKER_COOLDOWN_MS: ${LLM_BREAKER_COOLDOWN_MS:-}
+      MOCK_TOKEN_DELAY_MS: ${MOCK_TOKEN_DELAY_MS:-25}
+      PG_POOL_MAX: ${CHAT_PG_POOL_MAX:-40}
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # 讓容器能連到本機的 Ollama
+    depends_on:
+      <<: *infra-ready
+      billing: { condition: service_healthy }
+      character: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # =========================================================================== 基礎設施
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
+    environment:
+      POSTGRES_USER: chatapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatapp}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatapp -d chat"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # 狀態用 Redis:session(單一裝置)、分散式鎖、限流、串流續傳、事件 Stream。
+  # 這些資料不能被淘汰 → noeviction + AOF 持久化。
+  redis-state:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-state:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # 快取用 Redis:只放可重建的資料(角色、餘額顯示、最近訊息)。
+  # 滿了就用 LRU 淘汰、不持久化;快取吃滿記憶體也不會擠掉使用者的登入狀態。
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # 假的 LLM 伺服器(模仿 Gemini / OpenAI 串流格式,可切換成各種故障模式),用來演練備援。見 backend/scripts/fake-llm.ts
+  #   docker compose --profile tools up -d fake-llm
+  fake-llm:
+    <<: *bun
+    profiles: ["tools"]
+    restart: "no"
+    environment:
+      PORT: "9000"
+    command: ["bun", "scripts/fake-llm.ts"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # =========================================================================== 工具(在 compose 網路內跑腳本)
+  #   docker compose --profile tools run --rm tools bun scripts/smoke.ts
+  tools:
+    <<: *bun
+    profiles: ["tools"]
+    restart: "no"
+    environment:
+      <<: *bun-env
+      GATEWAY_URL: http://gateway:8080
+    depends_on:
+      gateway: { condition: service_healthy }
+    entrypoint: []
+    command: ["bun", "scripts/smoke.ts"]
+
+volumes:
+  pgdata:
+  redis-state:

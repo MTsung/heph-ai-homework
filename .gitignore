@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+
+# Flutter
+app/**/.dart_tool/
+app/**/build/
+app/**/.flutter-plugins*
+app/**/Pods/
+
+# 題目 PDF:僅放本機參考,不納入版控
+assignments/

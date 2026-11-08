@@ -1,0 +1,3816 @@
+{
+  "info": {
+    "_postman_id": "a1c9741c-a81d-4f15-977d-565cd0b5d896",
+    "name": "Chat APP API",
+    "description": "# Chat APP API\n\nAI 陪伴 App 後端。完整說明見 `docs/api/API.md`。\n\n## 使用方式\n1. `docker compose up -d --build` 啟動系統。\n2. 匯入本檔與 `chat-app.postman_environment.json`,環境選「Chat APP (local)」。\n3. 由上往下**依序**執行(或整個 Collection 按 Run):`Auth → Register` 會建立全新的測試帳號並把 `token` 等變數存進 collection 變數,之後的請求自動帶上。\n4. **`Events (長連線)` 是常駐連線,執行 Collection Runner 時請取消勾選。**\n5. 串流端點(送訊息、續傳):Postman 會等串流結束再顯示完整事件文字;要看逐字出現請用 `curl -N`。\n\n## 認證\n`Authorization: Bearer {{token}}`(collection 層級設定)。`register`、`login` 與後台資料夾不帶 token。\n\n## 資料夾\n- **Auth**:註冊、登入、單一裝置、登出\n- **Characters**、**Conversations**、**Points**:一般 API\n- **Events (長連線)**:常駐的 SSE 事件通道\n- **Admin (後台, 無權限)**:客服用的管理 API(⚠ 無權限控管)\n- **Account**:刪除帳號(放最後)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// 全域預設:沒有設定帳號/密碼時給預設值",
+          "if (!pm.collectionVariables.get(\"password\")) pm.collectionVariables.set(\"password\", \"secret123\");"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "description": "gateway(對外 API)"
+    },
+    {
+      "key": "adminUrl",
+      "value": "http://localhost:8090",
+      "description": "後台(僅本機,無權限)"
+    },
+    {
+      "key": "password",
+      "value": "secret123"
+    },
+    {
+      "key": "username",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "previousToken",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "characterId",
+      "value": ""
+    },
+    {
+      "key": "characterPrice",
+      "value": ""
+    },
+    {
+      "key": "conversationId",
+      "value": ""
+    },
+    {
+      "key": "clientMsgId",
+      "value": ""
+    },
+    {
+      "key": "assistantMessageId",
+      "value": ""
+    },
+    {
+      "key": "assistantSeq",
+      "value": ""
+    },
+    {
+      "key": "sentContent",
+      "value": ""
+    },
+    {
+      "key": "testSlug",
+      "value": ""
+    },
+    {
+      "key": "testCharacterId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "註冊、登入、單一裝置、登出。請由上往下依序執行。",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 每次執行用全新的帳號(帳號限 3–32 字、小寫英數與底線)",
+                  "pm.collectionVariables.set(\"username\", \"pm_\" + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 201\", function () { pm.response.to.have.status(201); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"有 token 與 user\", function () { pm.expect(j.token).to.be.a(\"string\"); pm.expect(j.user.id).to.be.a(\"string\"); });",
+                  "pm.test(\"第一次登入沒有取代任何裝置\", function () { pm.expect(j.replaced_device).to.eql(null); });",
+                  "pm.collectionVariables.set(\"token\", j.token);",
+                  "pm.collectionVariables.set(\"userId\", j.user.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "註冊並直接登入(裝置 A)。每次執行都會產生新的測試帳號,token 與 userId 自動存入 collection 變數。\n\n註冊贈送 200 點。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"nickname\": \"測試使用者\",\n  \"device_id\": \"postman-device-a\",\n  \"device_name\": \"Postman (裝置 A)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "201 註冊成功",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "註冊並直接登入(裝置 A)。每次執行都會產生新的測試帳號,token 與 userId 自動存入 collection 變數。\n\n註冊贈送 200 點。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"nickname\": \"測試使用者\",\n  \"device_id\": \"postman-device-a\",\n  \"device_name\": \"Postman (裝置 A)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…(JWT)…\",\n  \"expires_in\": 604800,\n  \"user\": {\n    \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n    \"username\": \"pm_mw779re9\",\n    \"nickname\": \"pm_mw779re9\"\n  },\n  \"session\": {\n    \"sid\": \"fe923200-1478-4fc4-a671-411ddf894c97\",\n    \"device_name\": \"Postman (裝置 A)\"\n  },\n  \"replaced_device\": null\n}"
+            },
+            {
+              "name": "409 帳號已被使用",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "註冊並直接登入(裝置 A)。每次執行都會產生新的測試帳號,token 與 userId 自動存入 collection 變數。\n\n註冊贈送 200 點。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"nickname\": \"測試使用者\",\n  \"device_id\": \"postman-device-a\",\n  \"device_name\": \"Postman (裝置 A)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"USERNAME_TAKEN\",\n    \"message\": \"這個帳號已被使用\"\n  }\n}"
+            },
+            {
+              "name": "400 欄位驗證失敗",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "註冊並直接登入(裝置 A)。每次執行都會產生新的測試帳號,token 與 userId 自動存入 collection 變數。\n\n註冊贈送 200 點。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"nickname\": \"測試使用者\",\n  \"device_id\": \"postman-device-a\",\n  \"device_name\": \"Postman (裝置 A)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_REQUEST\",\n    \"message\": \"username:帳號需為 3–32 個英數字或底線\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login (第二台裝置) — 會踢掉裝置 A",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 先把裝置 A 的 token 存起來,下一個請求要證明它已失效",
+                  "pm.collectionVariables.set(\"previousToken\", pm.collectionVariables.get(\"token\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"回報取代了裝置 A\", function () { pm.expect(j.replaced_device).to.eql(\"Postman (裝置 A)\"); });",
+                  "pm.test(\"拿到新的 token\", function () { pm.expect(j.token).to.not.eql(pm.collectionVariables.get(\"previousToken\")); });",
+                  "pm.collectionVariables.set(\"token\", j.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "用同一個帳號從另一台裝置(裝置 B)登入。**單一裝置**:裝置 A 的 token 立即失效。\n\n回應的 `replaced_device` 是被踢掉的裝置名稱。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 登入成功(踢掉了另一台)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "用同一個帳號從另一台裝置(裝置 B)登入。**單一裝置**:裝置 A 的 token 立即失效。\n\n回應的 `replaced_device` 是被踢掉的裝置名稱。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…(JWT)…\",\n  \"expires_in\": 604800,\n  \"user\": {\n    \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n    \"username\": \"pm_mw779re9\",\n    \"nickname\": \"pm_mw779re9\"\n  },\n  \"session\": {\n    \"sid\": \"fe923200-1478-4fc4-a671-411ddf894c97\",\n    \"device_name\": \"Postman (裝置 B)\"\n  },\n  \"replaced_device\": \"Postman (裝置 A)\"\n}"
+            },
+            {
+              "name": "401 帳號或密碼錯誤",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "用同一個帳號從另一台裝置(裝置 B)登入。**單一裝置**:裝置 A 的 token 立即失效。\n\n回應的 `replaced_device` 是被踢掉的裝置名稱。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_CREDENTIALS\",\n    \"message\": \"帳號或密碼錯誤\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "驗證舊 token 已失效 (SESSION_REPLACED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"錯誤碼 SESSION_REPLACED\", function () { pm.expect(pm.response.json().error.code).to.eql(\"SESSION_REPLACED\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "用裝置 A 的舊 token 呼叫任何 API,回 `401 SESSION_REPLACED`。客戶端收到這個 code 應該回到登入畫面並提示「已在其他裝置登入」。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{previousToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "401 已在其他裝置登入",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "用裝置 A 的舊 token 呼叫任何 API,回 `401 SESSION_REPLACED`。客戶端收到這個 code 應該回到登入畫面並提示「已在其他裝置登入」。",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{previousToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"SESSION_REPLACED\",\n    \"message\": \"你的帳號已在其他裝置登入\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get me",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"是剛註冊的帳號\", function () { pm.expect(pm.response.json().username).to.eql(pm.collectionVariables.get(\"username\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "目前使用者資訊。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "目前使用者資訊。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n  \"username\": \"pm_mw779re9\",\n  \"nickname\": \"測試使用者\",\n  \"created_at\": \"2026-11-08T02:15:21.231Z\"\n}"
+            },
+            {
+              "name": "401 未登入",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "目前使用者資訊。"
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"UNAUTHENTICATED\",\n    \"message\": \"請先登入\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"ok\", function () { pm.expect(pm.response.json().ok).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "登出目前的裝置。之後同一個 token 回 `401 SESSION_EXPIRED`。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/logout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "logout"
+                  ]
+                },
+                "description": "登出目前的裝置。之後同一個 token 回 `401 SESSION_EXPIRED`。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"ok\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "驗證登出後 token 已失效 (SESSION_EXPIRED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"錯誤碼 SESSION_EXPIRED\", function () { pm.expect(pm.response.json().error.code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "登出後 token 失效,回 `401 SESSION_EXPIRED`。"
+          },
+          "response": [
+            {
+              "name": "401 登入已失效",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "登出後 token 失效,回 `401 SESSION_EXPIRED`。"
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"SESSION_EXPIRED\",\n    \"message\": \"登入已失效,請重新登入\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login (登出後重新登入)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "重新登入以取得可用的 token,後續請求會用它。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "重新登入以取得可用的 token,後續請求會用它。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…(JWT)…\",\n  \"expires_in\": 604800,\n  \"user\": {\n    \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n    \"username\": \"pm_mw779re9\",\n    \"nickname\": \"pm_mw779re9\"\n  },\n  \"session\": {\n    \"sid\": \"fe923200-1478-4fc4-a671-411ddf894c97\",\n    \"device_name\": \"Postman (裝置 B)\"\n  },\n  \"replaced_device\": null\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Characters",
+      "description": "角色資料。人設 (system prompt) 不會對外。",
+      "item": [
+        {
+          "name": "List characters",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var items = pm.response.json().items;",
+                  "pm.test(\"至少有一位角色\", function () { pm.expect(items.length).to.be.above(0); });",
+                  "pm.test(\"不外洩人設 (persona)\", function () { items.forEach(function (c) { pm.expect(c).to.not.have.property(\"persona\"); }); });",
+                  "pm.collectionVariables.set(\"characterId\", items[0].id);",
+                  "pm.collectionVariables.set(\"characterPrice\", String(items[0].price));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/characters",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "characters"
+              ]
+            },
+            "description": "上架中的角色。`price` 是每則成功回覆扣的點數。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/characters",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "characters"
+                  ]
+                },
+                "description": "上架中的角色。`price` 是每則成功回覆扣的點數。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n      \"slug\": \"xi\",\n      \"name\": \"小曦\",\n      \"tagline\": \"溫柔的傾聽者,陪你說說心裡話\",\n      \"avatar\": \"🌅\",\n      \"greeting\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"price\": 2\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get character",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"id 相符\", function () { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get(\"characterId\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/characters/{{characterId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "characters",
+                "{{characterId}}"
+              ]
+            },
+            "description": "單一角色。不存在、已下架或 id 不是 UUID → 404。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/characters/{{characterId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "characters",
+                    "{{characterId}}"
+                  ]
+                },
+                "description": "單一角色。不存在、已下架或 id 不是 UUID → 404。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n  \"slug\": \"xi\",\n  \"name\": \"小曦\",\n  \"tagline\": \"溫柔的傾聽者,陪你說說心裡話\",\n  \"avatar\": \"🌅\",\n  \"greeting\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n  \"price\": 2\n}"
+            },
+            {
+              "name": "404 角色不存在",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/characters/{{characterId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "characters",
+                    "{{characterId}}"
+                  ]
+                },
+                "description": "單一角色。不存在、已下架或 id 不是 UUID → 404。"
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"角色不存在\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Conversations",
+      "description": "對話、歷史訊息與串流聊天。一位使用者與一個角色只有一條對話。",
+      "item": [
+        {
+          "name": "Open conversation (create or get)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 新建立 或 200 已存在\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"conversationId\", j.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations"
+              ]
+            },
+            "description": "開啟與某角色的對話。已存在則直接回傳(冪等)。新建立時角色的開場白是 `seq = 1` 的第一則訊息。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"character_id\": \"{{characterId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 新建立",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations"
+                  ]
+                },
+                "description": "開啟與某角色的對話。已存在則直接回傳(冪等)。新建立時角色的開場白是 `seq = 1` 的第一則訊息。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"character_id\": \"{{characterId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n  \"character_id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n  \"last_message_at\": \"2026-11-08T02:15:21.231Z\",\n  \"last_preview\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n  \"latest_seq\": 1,\n  \"created_at\": \"2026-11-08T02:15:21.231Z\"\n}"
+            },
+            {
+              "name": "404 角色不存在",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations"
+                  ]
+                },
+                "description": "開啟與某角色的對話。已存在則直接回傳(冪等)。新建立時角色的開場白是 `seq = 1` 的第一則訊息。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"character_id\": \"{{characterId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"角色不存在\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List conversations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"包含剛建立的對話\", function () { var id = pm.collectionVariables.get(\"conversationId\"); pm.expect(pm.response.json().items.some(function (c) { return c.id === id; })).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations"
+              ]
+            },
+            "description": "目前使用者的所有對話,依最後訊息時間新→舊。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations"
+                  ]
+                },
+                "description": "目前使用者的所有對話,依最後訊息時間新→舊。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"character_id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n      \"last_message_at\": \"2026-11-08T02:15:21.231Z\",\n      \"last_preview\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"latest_seq\": 1,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get history (latest page)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"第一則是角色的開場白 (seq=1)\", function () { pm.expect(j.items[0].seq).to.eql(1); pm.expect(j.items[0].role).to.eql(\"assistant\"); });",
+                  "pm.test(\"seq 嚴格遞增且連續\", function () { j.items.forEach(function (m, i) { if (i > 0) pm.expect(m.seq).to.eql(j.items[i - 1].seq + 1); }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?limit=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "30",
+                  "description": "每頁筆數 1–100,預設 30"
+                }
+              ]
+            },
+            "description": "開啟對話時讀最新一頁。`items` 依 `seq` 由舊到新。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?limit=30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "30",
+                      "description": "每頁筆數 1–100,預設 30"
+                    }
+                  ]
+                },
+                "description": "開啟對話時讀最新一頁。`items` 依 `seq` 由舊到新。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"59cb2b20-d47b-4174-a469-1f7f3abf819b\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 1,\n      \"role\": \"assistant\",\n      \"content\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"client_msg_id\": null,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ],\n  \"has_more_before\": false,\n  \"has_more_after\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Send message (SSE)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"clientMsgId\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Content-Type 是 text/event-stream\", function () { pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/event-stream\"); });",
+                  "// 把 SSE 純文字拆成事件陣列(Postman 會等串流結束再給完整文字)",
+                  "function parseSse(text) {",
+                  "  return text.split(\"\\n\\n\").map(function (b) {",
+                  "    var ev = { event: \"message\", data: null, id: null };",
+                  "    b.split(\"\\n\").forEach(function (l) {",
+                  "      if (l.indexOf(\"event:\") === 0) ev.event = l.slice(6).trim();",
+                  "      else if (l.indexOf(\"id:\") === 0) ev.id = l.slice(3).trim();",
+                  "      else if (l.indexOf(\"data:\") === 0) { try { ev.data = JSON.parse(l.slice(5).trim()); } catch (e) {} }",
+                  "    });",
+                  "    return ev;",
+                  "  }).filter(function (e) { return e.data !== null; });",
+                  "}",
+                  "var evs = parseSse(pm.response.text());",
+                  "var names = evs.map(function (e) { return e.event; });",
+                  "pm.test(\"事件順序: user_message → assistant_start → delta… → done\", function () {",
+                  "  pm.expect(names[0]).to.eql(\"user_message\"); pm.expect(names[1]).to.eql(\"assistant_start\");",
+                  "  pm.expect(names[names.length - 1]).to.eql(\"done\");",
+                  "});",
+                  "var deltas = evs.filter(function (e) { return e.event === \"delta\"; });",
+                  "var done = evs[evs.length - 1].data;",
+                  "pm.test(\"delta 逐段傳來,拼起來等於 done 的全文\", function () {",
+                  "  pm.expect(deltas.length).to.be.above(1);",
+                  "  pm.expect(deltas.map(function (d) { return d.data.t; }).join(\"\")).to.eql(done.message.content);",
+                  "});",
+                  "pm.test(\"done 帶回結算後餘額 (200 − 單價)\", function () { pm.expect(done.balance).to.eql(200 - Number(pm.collectionVariables.get(\"characterPrice\"))); });",
+                  "pm.collectionVariables.set(\"assistantMessageId\", evs[1].data.id);",
+                  "pm.collectionVariables.set(\"assistantSeq\", String(evs[1].data.seq));",
+                  "pm.collectionVariables.set(\"sentContent\", done.message.content);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ]
+            },
+            "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 串流(成功)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: user_message\ndata: {\"id\":\"2aaf70d1-4341-4f68-b740-7e2db4060d06\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":2,\"role\":\"user\",\"content\":\"你好\",\"status\":\"completed\",\"error_code\":null,\"client_msg_id\":\"c41b60c9-9f08-4888-9a96-149b0a92505a\",\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nevent: assistant_start\ndata: {\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"seq\":3,\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nid: 1\nevent: delta\ndata: {\"t\":\"嗨,\"}\n\nid: 2\nevent: delta\ndata: {\"t\":\"見\"}\n\n…(中間的 delta 省略)…\n\nevent: done\ndata: {\"message\":{\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":3,\"role\":\"assistant\",\"content\":\"嗨,見到你真好。今天心情怎麼樣?\",\"status\":\"completed\",\"error_code\":null,\"created_at\":\"2026-11-08T02:15:21.231Z\"},\"balance\":198}\n"
+            },
+            {
+              "name": "200 串流(模型中途失敗,不扣點)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: assistant_start\ndata: {\"id\":\"ed6155b2-4971-40ff-b5ca-e5a89daf367c\",\"seq\":5,\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nevent: error\ndata: {\"code\":\"LLM_ERROR\",\"message\":\"模型暫時無法回應,請稍後再試\",\"retryable\":true,\"state\":{\"id\":\"ed6155b2-4971-40ff-b5ca-e5a89daf367c\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":5,\"role\":\"assistant\",\"content\":\"嗯嗯,你說「測試」,我\",\"status\":\"failed\",\"error_code\":\"LLM_ERROR\",\"created_at\":\"2026-11-08T02:15:21.231Z\"}}\n"
+            },
+            {
+              "name": "402 點數不足",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Payment Required",
+              "code": 402,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_POINTS\",\n    \"message\": \"點數不足\",\n    \"required\": 2,\n    \"balance\": 200,\n    \"available\": 1\n  }\n}"
+            },
+            {
+              "name": "409 該對話已有回覆進行中",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"GENERATION_IN_PROGRESS\",\n    \"message\": \"AI 正在回覆上一則訊息,請稍候\"\n  }\n}"
+            },
+            {
+              "name": "429 被限流",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Too Many Requests",
+              "code": 429,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"RATE_LIMITED\",\n    \"message\": \"請求太頻繁,請稍後再試\",\n    \"retry_after\": 48\n  }\n}"
+            },
+            {
+              "name": "400 內容為空",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "**送出訊息並以 SSE 串流接收 AI 回覆。**\n\n- `client_msg_id` 是冪等鍵,由客戶端產生(8–64 字,建議 UUID)。這個請求每次執行會產生新的。\n- Postman 會等串流結束(收到 `done`)再一次顯示完整事件文字;要看逐字出現請用 `curl -N`。\n- 串流開始前的失敗是一般 JSON 錯誤,此時未寫入訊息、未扣點(402 點數不足、409 對話忙碌、429 限流…)。\n- 成功才扣點;失敗不扣。\n\n事件:`user_message` → `assistant_start` → `delta`… → `done` / `error`。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_REQUEST\",\n    \"message\": \"content:訊息不可為空\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Send message — 重送同一個 client_msg_id (冪等)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "// 把 SSE 純文字拆成事件陣列(Postman 會等串流結束再給完整文字)",
+                  "function parseSse(text) {",
+                  "  return text.split(\"\\n\\n\").map(function (b) {",
+                  "    var ev = { event: \"message\", data: null, id: null };",
+                  "    b.split(\"\\n\").forEach(function (l) {",
+                  "      if (l.indexOf(\"event:\") === 0) ev.event = l.slice(6).trim();",
+                  "      else if (l.indexOf(\"id:\") === 0) ev.id = l.slice(3).trim();",
+                  "      else if (l.indexOf(\"data:\") === 0) { try { ev.data = JSON.parse(l.slice(5).trim()); } catch (e) {} }",
+                  "    });",
+                  "    return ev;",
+                  "  }).filter(function (e) { return e.data !== null; });",
+                  "}",
+                  "var evs = parseSse(pm.response.text());",
+                  "var names = evs.map(function (e) { return e.event; });",
+                  "pm.test(\"回放: user_message → assistant_start → snapshot → done\", function () { pm.expect(names).to.eql([\"user_message\", \"assistant_start\", \"snapshot\", \"done\"]); });",
+                  "pm.test(\"是同一則 AI 訊息\", function () { pm.expect(evs[1].data.id).to.eql(pm.collectionVariables.get(\"assistantMessageId\")); });",
+                  "pm.test(\"回放的內容相同\", function () { pm.expect(evs[3].data.message.content).to.eql(pm.collectionVariables.get(\"sentContent\")); });",
+                  "pm.test(\"回放的 balance 為 null (不會再結算)\", function () { pm.expect(evs[3].data.balance).to.eql(null); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ]
+            },
+            "description": "用**同一個** `client_msg_id` 再送一次(模擬網路中斷後重試)。結果:回放同一則回覆(`snapshot` + `done`),**不會多一則訊息、也不會重複扣點**。\n\n失敗的回覆用同樣方式重試:會沿用同一則 AI 訊息(相同 `seq`)重新生成。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 回放(已完成的回覆)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "用**同一個** `client_msg_id` 再送一次(模擬網路中斷後重試)。結果:回放同一則回覆(`snapshot` + `done`),**不會多一則訊息、也不會重複扣點**。\n\n失敗的回覆用同樣方式重試:會沿用同一則 AI 訊息(相同 `seq`)重新生成。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"你好,今天心情有點累\",\n  \"client_msg_id\": \"{{clientMsgId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: user_message\ndata: {\"id\":\"2aaf70d1-4341-4f68-b740-7e2db4060d06\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":2,\"role\":\"user\",\"content\":\"你好\",\"status\":\"completed\",\"error_code\":null,\"client_msg_id\":\"c41b60c9-9f08-4888-9a96-149b0a92505a\",\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nevent: assistant_start\ndata: {\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"seq\":3,\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nevent: snapshot\ndata: {\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"content\":\"嗨,見到你真好。今天心情怎麼樣?\",\"n\":0}\n\nevent: done\ndata: {\"message\":{\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":3,\"role\":\"assistant\",\"content\":\"嗨,見到你真好。今天心情怎麼樣?\",\"status\":\"completed\",\"error_code\":null,\"client_msg_id\":null,\"created_at\":\"2026-11-08T02:15:21.231Z\"},\"balance\":null}\n"
+            }
+          ]
+        },
+        {
+          "name": "Resume stream (SSE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "// 把 SSE 純文字拆成事件陣列(Postman 會等串流結束再給完整文字)",
+                  "function parseSse(text) {",
+                  "  return text.split(\"\\n\\n\").map(function (b) {",
+                  "    var ev = { event: \"message\", data: null, id: null };",
+                  "    b.split(\"\\n\").forEach(function (l) {",
+                  "      if (l.indexOf(\"event:\") === 0) ev.event = l.slice(6).trim();",
+                  "      else if (l.indexOf(\"id:\") === 0) ev.id = l.slice(3).trim();",
+                  "      else if (l.indexOf(\"data:\") === 0) { try { ev.data = JSON.parse(l.slice(5).trim()); } catch (e) {} }",
+                  "    });",
+                  "    return ev;",
+                  "  }).filter(function (e) { return e.data !== null; });",
+                  "}",
+                  "var evs = parseSse(pm.response.text());",
+                  "var names = evs.map(function (e) { return e.event; });",
+                  "pm.test(\"assistant_start → snapshot → done\", function () { pm.expect(names).to.eql([\"assistant_start\", \"snapshot\", \"done\"]); });",
+                  "pm.test(\"snapshot 是完整內容\", function () { pm.expect(evs[1].data.content).to.eql(pm.collectionVariables.get(\"sentContent\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages/{{assistantMessageId}}/stream",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages",
+                "{{assistantMessageId}}",
+                "stream"
+              ]
+            },
+            "description": "**續傳**:接回一則 AI 回覆的串流(斷線、App 重開、切換對話後回來)。\n\n- 進行中:`snapshot`(目前累積的全文)→ 之後的 `delta` → `done`/`error`\n- 已完成:`snapshot` → `done`\n- 已失敗:`snapshot`(部分文字)→ `error`\n\n`snapshot` 的內容要**取代**畫面上的文字,不是附加。"
+          },
+          "response": [
+            {
+              "name": "200 續傳(已完成的訊息)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages/{{assistantMessageId}}/stream",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages",
+                    "{{assistantMessageId}}",
+                    "stream"
+                  ]
+                },
+                "description": "**續傳**:接回一則 AI 回覆的串流(斷線、App 重開、切換對話後回來)。\n\n- 進行中:`snapshot`(目前累積的全文)→ 之後的 `delta` → `done`/`error`\n- 已完成:`snapshot` → `done`\n- 已失敗:`snapshot`(部分文字)→ `error`\n\n`snapshot` 的內容要**取代**畫面上的文字,不是附加。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: assistant_start\ndata: {\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"seq\":3,\"created_at\":\"2026-11-08T02:15:21.231Z\"}\n\nevent: snapshot\ndata: {\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"content\":\"嗨,見到你真好。今天心情怎麼樣?\",\"n\":0}\n\nevent: done\ndata: {\"message\":{\"id\":\"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\"conversation_id\":\"5c847329-5533-4ca3-84d4-ad55f1596b24\",\"seq\":3,\"role\":\"assistant\",\"content\":\"嗨,見到你真好。今天心情怎麼樣?\",\"status\":\"completed\",\"error_code\":null,\"client_msg_id\":null,\"created_at\":\"2026-11-08T02:15:21.231Z\"},\"balance\":null}\n"
+            },
+            {
+              "name": "404 訊息不存在",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages/{{assistantMessageId}}/stream",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages",
+                    "{{assistantMessageId}}",
+                    "stream"
+                  ]
+                },
+                "description": "**續傳**:接回一則 AI 回覆的串流(斷線、App 重開、切換對話後回來)。\n\n- 進行中:`snapshot`(目前累積的全文)→ 之後的 `delta` → `done`/`error`\n- 已完成:`snapshot` → `done`\n- 已失敗:`snapshot`(部分文字)→ `error`\n\n`snapshot` 的內容要**取代**畫面上的文字,不是附加。"
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"找不到訊息\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get history — 往上滑 (before_seq)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json(); var cut = Number(pm.collectionVariables.get(\"assistantSeq\"));",
+                  "pm.test(\"全部早於游標\", function () { j.items.forEach(function (m) { pm.expect(m.seq).to.be.below(cut); }); });",
+                  "pm.test(\"沒有更早的了 (只有開場白和第一則)\", function () { pm.expect(j.has_more_before).to.eql(false); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?before_seq={{assistantSeq}}&limit=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "before_seq",
+                  "value": "{{assistantSeq}}",
+                  "description": "取 seq 小於此值的前一頁(keyset 分頁)"
+                },
+                {
+                  "key": "limit",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "往上滑載入更早的訊息:用畫面上**最舊那則**的 `seq` 當 `before_seq`,直到 `has_more_before` 為 `false`。\n\n游標是 `seq` 而不是頁碼,翻頁期間有新訊息進來也不會重複或漏掉,翻到多深成本都一樣。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?before_seq={{assistantSeq}}&limit=30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "before_seq",
+                      "value": "{{assistantSeq}}",
+                      "description": "取 seq 小於此值的前一頁(keyset 分頁)"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "30"
+                    }
+                  ]
+                },
+                "description": "往上滑載入更早的訊息:用畫面上**最舊那則**的 `seq` 當 `before_seq`,直到 `has_more_before` 為 `false`。\n\n游標是 `seq` 而不是頁碼,翻頁期間有新訊息進來也不會重複或漏掉,翻到多深成本都一樣。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"7b70c0af-c246-4091-9001-ab4de39a9ae3\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 1,\n      \"role\": \"assistant\",\n      \"content\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"client_msg_id\": null,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    },\n    {\n      \"id\": \"de95ce22-b79a-4e44-bafb-0ddff9a54d2c\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 2,\n      \"role\": \"user\",\n      \"content\": \"你好\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"client_msg_id\": null,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ],\n  \"has_more_before\": false,\n  \"has_more_after\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get history — 補同步 (after_seq)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"都比 after_seq 新,且由舊到新\", function () { j.items.forEach(function (m, i) { pm.expect(m.seq).to.be.above(1); if (i > 0) pm.expect(m.seq).to.be.above(j.items[i - 1].seq); }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?after_seq=1&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "after_seq",
+                  "value": "1",
+                  "description": "取 seq 大於此值的訊息(由舊到新)"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "補同步:把比本地最新 `seq` 還新的訊息撈回來。用於 App 回到前景、網路恢復、或另一台裝置發過訊息之後。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?after_seq=1&limit=100",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "after_seq",
+                      "value": "1",
+                      "description": "取 seq 大於此值的訊息(由舊到新)"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "100"
+                    }
+                  ]
+                },
+                "description": "補同步:把比本地最新 `seq` 還新的訊息撈回來。用於 App 回到前景、網路恢復、或另一台裝置發過訊息之後。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"b77b9c6e-a404-449d-890b-894d9b4710c0\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 2,\n      \"role\": \"user\",\n      \"content\": \"你好\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"client_msg_id\": null,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    },\n    {\n      \"id\": \"ec4d738b-129b-45ac-aa42-2fd3ddd1a2dd\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 3,\n      \"role\": \"assistant\",\n      \"content\": \"嗨,見到你真好。今天心情怎麼樣?\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"client_msg_id\": null,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ],\n  \"has_more_before\": false,\n  \"has_more_after\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get history — 驗證失敗 (limit 超出範圍)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"錯誤碼 INVALID_REQUEST\", function () { pm.expect(pm.response.json().error.code).to.eql(\"INVALID_REQUEST\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?limit=101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "101"
+                }
+              ]
+            },
+            "description": "`limit` 只能是 1–100。"
+          },
+          "response": [
+            {
+              "name": "400",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/conversations/{{conversationId}}/messages?limit=101",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "101"
+                    }
+                  ]
+                },
+                "description": "`limit` 只能是 1–100。"
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_REQUEST\",\n    \"message\": \"limit:Number must be less than or equal to 100\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Points",
+      "description": "點數。送訊息前預扣、成功才結算、失敗歸還。可用點數 = 總點數 − 預扣中。",
+      "item": [
+        {
+          "name": "Get balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"可用 = 總點數 − 預扣中\", function () { pm.expect(j.available).to.eql(j.balance - j.held); });",
+                  "pm.test(\"已扣一則回覆的點數\", function () { pm.expect(j.balance).to.eql(200 - Number(pm.collectionVariables.get(\"characterPrice\"))); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/points/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "points",
+                "balance"
+              ]
+            },
+            "description": "點數餘額(含最多 30 秒的伺服器端快取,僅供顯示;是否足夠以送訊息當下的檢查為準)。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/points/balance",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "points",
+                    "balance"
+                  ]
+                },
+                "description": "點數餘額(含最多 30 秒的伺服器端快取,僅供顯示;是否足夠以送訊息當下的檢查為準)。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"balance\": 198,\n  \"held\": 0,\n  \"available\": 198\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get ledger (點數明細)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var items = pm.response.json().items;",
+                  "pm.test(\"有註冊贈點 +200\", function () { pm.expect(items.some(function (i) { return i.type === \"grant\" && i.amount === 200 && i.ref_type === \"signup\"; })).to.eql(true); });",
+                  "pm.test(\"有一筆扣點,可追溯到這則 AI 訊息\", function () {",
+                  "  var c = items.filter(function (i) { return i.type === \"charge\"; });",
+                  "  pm.expect(c.length).to.eql(1); pm.expect(c[0].amount).to.eql(-Number(pm.collectionVariables.get(\"characterPrice\")));",
+                  "  pm.expect(c[0].meta.message_id).to.eql(pm.collectionVariables.get(\"assistantMessageId\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/points/ledger?limit=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "points",
+                "ledger"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "30",
+                  "description": "1–100,預設 30"
+                },
+                {
+                  "key": "before_id",
+                  "value": "",
+                  "disabled": true,
+                  "description": "取 id 小於此值的下一頁;留空取最新"
+                }
+              ]
+            },
+            "description": "點數明細(使用者與客服看到的是同一份)。新→舊,以 `id` 為游標;`next_before_id` 為 `null` 表示沒有下一頁。\n\n只有**成功**的回覆會出現(失敗不扣點,沒有紀錄)。"
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/points/ledger?limit=30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "points",
+                    "ledger"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "30",
+                      "description": "1–100,預設 30"
+                    },
+                    {
+                      "key": "before_id",
+                      "value": "",
+                      "disabled": true,
+                      "description": "取 id 小於此值的下一頁;留空取最新"
+                    }
+                  ]
+                },
+                "description": "點數明細(使用者與客服看到的是同一份)。新→舊,以 `id` 為游標;`next_before_id` 為 `null` 表示沒有下一頁。\n\n只有**成功**的回覆會出現(失敗不扣點,沒有紀錄)。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": 32,\n      \"type\": \"charge\",\n      \"amount\": -2,\n      \"balance_after\": 198,\n      \"ref_type\": \"message\",\n      \"ref_id\": \"c542e5ce-3f1b-4189-84c2-ba371ef29fb2#0\",\n      \"note\": \"與小曦的對話\",\n      \"meta\": {\n        \"seq\": 3,\n        \"note\": \"與小曦的對話\",\n        \"message_id\": \"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\n        \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\"\n      },\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    },\n    {\n      \"id\": 31,\n      \"type\": \"grant\",\n      \"amount\": 200,\n      \"balance_after\": 200,\n      \"ref_type\": \"signup\",\n      \"ref_id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n      \"note\": \"註冊贈點\",\n      \"meta\": {},\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ],\n  \"next_before_id\": null\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Events (長連線)",
+      "description": "⚠ 這個資料夾裡的請求是**常駐連線,不會自己結束**。請單獨手動送出,不要放進 Collection Runner 自動執行(取消勾選)。",
+      "item": [
+        {
+          "name": "開啟事件通道 (SSE, 常駐)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ]
+            },
+            "description": "常駐的 SSE 連線,讓伺服器主動通知客戶端。目前用來即時告知「這個 session 失效了」。\n\n**試試看**:送出這個請求讓它保持連線,然後到 Auth 資料夾用另一組裝置資料登入同一個帳號(或在後台強制登出),這裡會立刻收到 `session_replaced`。\n\n- `reason: \"replaced\"`:另一台裝置登入(`device_name` 是新裝置)\n- `reason: \"revoked\"`:登出 / 後台強制登出 / 帳號刪除\n\n每 ~20 秒一則 `: hb` 心跳。"
+          },
+          "response": [
+            {
+              "name": "連線建立",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "events"
+                  ]
+                },
+                "description": "常駐的 SSE 連線,讓伺服器主動通知客戶端。目前用來即時告知「這個 session 失效了」。\n\n**試試看**:送出這個請求讓它保持連線,然後到 Auth 資料夾用另一組裝置資料登入同一個帳號(或在後台強制登出),這裡會立刻收到 `session_replaced`。\n\n- `reason: \"replaced\"`:另一台裝置登入(`device_name` 是新裝置)\n- `reason: \"revoked\"`:登出 / 後台強制登出 / 帳號刪除\n\n每 ~20 秒一則 `: hb` 心跳。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: ready\ndata: {\"ok\":true}\n"
+            },
+            {
+              "name": "被另一台裝置取代",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "events"
+                  ]
+                },
+                "description": "常駐的 SSE 連線,讓伺服器主動通知客戶端。目前用來即時告知「這個 session 失效了」。\n\n**試試看**:送出這個請求讓它保持連線,然後到 Auth 資料夾用另一組裝置資料登入同一個帳號(或在後台強制登出),這裡會立刻收到 `session_replaced`。\n\n- `reason: \"replaced\"`:另一台裝置登入(`device_name` 是新裝置)\n- `reason: \"revoked\"`:登出 / 後台強制登出 / 帳號刪除\n\n每 ~20 秒一則 `: hb` 心跳。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: session_replaced\ndata: {\"reason\":\"replaced\",\"device_name\":\"iPad\",\"message\":\"你的帳號已在其他裝置登入\"}\n"
+            },
+            {
+              "name": "登出 / 強制登出",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "events"
+                  ]
+                },
+                "description": "常駐的 SSE 連線,讓伺服器主動通知客戶端。目前用來即時告知「這個 session 失效了」。\n\n**試試看**:送出這個請求讓它保持連線,然後到 Auth 資料夾用另一組裝置資料登入同一個帳號(或在後台強制登出),這裡會立刻收到 `session_replaced`。\n\n- `reason: \"replaced\"`:另一台裝置登入(`device_name` 是新裝置)\n- `reason: \"revoked\"`:登出 / 後台強制登出 / 帳號刪除\n\n每 ~20 秒一則 `: hb` 心跳。"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "event: session_replaced\ndata: {\"reason\":\"revoked\",\"device_name\":null,\"message\":\"登入已失效\"}\n"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin (後台, 無權限)",
+      "description": "⚠ **後台沒有任何權限控管**(依需求),僅綁定 127.0.0.1,打的是 `{{adminUrl}}`(預設 8090),不需要 token。能查看對話內容、調整點數、強制登出。**上線前必須加上身分驗證、角色權限與操作稽核。**",
+      "item": [
+        {
+          "name": "Overview",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var j = pm.response.json();",
+                  "pm.test(\"含 auth / chat / billing / redis / cache\", function () { [\"auth\", \"chat\", \"billing\", \"redis\", \"cache\"].forEach(function (k) { pm.expect(j).to.have.property(k); }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/overview",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "overview"
+              ]
+            },
+            "description": "系統總覽。任一後端服務暫時不可用時,該鍵會是 `{\"error\": \"…\"}` 而不是整個失敗。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/overview",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "overview"
+                  ]
+                },
+                "description": "系統總覽。任一後端服務暫時不可用時,該鍵會是 `{\"error\": \"…\"}` 而不是整個失敗。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"auth\": {\n    \"users\": 11,\n    \"active_sessions\": 10,\n    \"new_users_24h\": 11\n  },\n  \"chat\": {\n    \"conversations\": 9,\n    \"messages\": 67,\n    \"streaming_now\": 0,\n    \"failed_total\": 4,\n    \"billing_pending\": 0,\n    \"active_generations_this_instance\": 0\n  },\n  \"billing\": {\n    \"accounts\": 9,\n    \"total_balance\": 1760,\n    \"total_held\": 0,\n    \"active_holds\": 0,\n    \"total_granted\": 1810,\n    \"total_charged\": 50,\n    \"charges_24h\": 25\n  },\n  \"redis\": {\n    \"state\": {\n      \"used_memory\": \"1.60M\",\n      \"maxmemory_policy\": \"noeviction\",\n      \"connected_clients\": 10,\n      \"ops_per_sec\": 1,\n      \"evicted_keys\": 0,\n      \"keyspace_hit_rate\": 0.99\n    },\n    \"cache\": {\n      \"used_memory\": \"1.36M\",\n      \"maxmemory_policy\": \"allkeys-lru\"\n    }\n  },\n  \"cache\": [\n    {\n      \"name\": \"chat/recent\",\n      \"hit\": 35,\n      \"miss\": 8,\n      \"hit_rate\": 0.8139\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Search users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var u = pm.response.json().items.filter(function (x) { return x.id === pm.collectionVariables.get(\"userId\"); })[0];",
+                  "pm.test(\"找得到剛註冊的使用者,且有點數資料\", function () { pm.expect(u).to.be.an(\"object\"); pm.expect(u.points).to.have.property(\"available\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/users?q={{username}}&offset=0",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{username}}",
+                  "description": "帳號或暱稱(部分比對,不分大小寫);留空列出全部"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "位移,每頁固定 50 筆"
+                }
+              ]
+            },
+            "description": "搜尋使用者並附點數。`device_name` 為 `null` 代表目前未登入。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/users?q={{username}}&offset=0",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "users"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "{{username}}",
+                      "description": "帳號或暱稱(部分比對,不分大小寫);留空列出全部"
+                    },
+                    {
+                      "key": "offset",
+                      "value": "0",
+                      "description": "位移,每頁固定 50 筆"
+                    }
+                  ]
+                },
+                "description": "搜尋使用者並附點數。`device_name` 為 `null` 代表目前未登入。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n      \"username\": \"pm_mw779re9\",\n      \"nickname\": \"測試使用者\",\n      \"created_at\": \"2026-11-08T02:15:21.231Z\",\n      \"device_name\": \"Postman (裝置 B)\",\n      \"session_started_at\": \"2026-11-08T02:15:21.231Z\",\n      \"points\": {\n        \"balance\": 198,\n        \"held\": 0,\n        \"available\": 198\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Grant points (補點)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"入帳成功,餘額增加 50\", function () { var j = pm.response.json(); pm.expect(j.ok).to.eql(true); pm.expect(j.balance).to.eql(200 - Number(pm.collectionVariables.get(\"characterPrice\")) + 50); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{adminUrl}}/api/users/{{userId}}/grant",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "grant"
+              ]
+            },
+            "description": "客服補點。會寫入使用者可見的點數明細,註記 `[後台] {reason}`。`amount` 1–1,000,000。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 50,\n  \"reason\": \"Postman 測試補點\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{adminUrl}}/api/users/{{userId}}/grant",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "users",
+                    "{{userId}}",
+                    "grant"
+                  ]
+                },
+                "description": "客服補點。會寫入使用者可見的點數明細,註記 `[後台] {reason}`。`amount` 1–1,000,000。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 50,\n  \"reason\": \"Postman 測試補點\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"ok\": true,\n  \"already\": false,\n  \"balance\": 248\n}"
+            }
+          ]
+        },
+        {
+          "name": "User ledger (客服查明細)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"看得到剛才的後台補點\", function () { pm.expect(pm.response.json().items.some(function (i) { return i.note.indexOf(\"[後台]\") === 0 && i.amount === 50; })).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/users/{{userId}}/ledger",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "ledger"
+              ],
+              "query": [
+                {
+                  "key": "before_id",
+                  "value": "",
+                  "disabled": true,
+                  "description": "下一頁游標,留空取最新"
+                }
+              ]
+            },
+            "description": "該使用者的完整點數明細(與使用者端同一份帳本),每頁固定 50 筆。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/users/{{userId}}/ledger",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "users",
+                    "{{userId}}",
+                    "ledger"
+                  ],
+                  "query": [
+                    {
+                      "key": "before_id",
+                      "value": "",
+                      "disabled": true,
+                      "description": "下一頁游標,留空取最新"
+                    }
+                  ]
+                },
+                "description": "該使用者的完整點數明細(與使用者端同一份帳本),每頁固定 50 筆。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": 36,\n      \"type\": \"grant\",\n      \"amount\": 50,\n      \"balance_after\": 248,\n      \"ref_type\": \"grant\",\n      \"ref_id\": \"admin:a48d71d5-e883-4e1f-9e2f-bd9acb82485b\",\n      \"note\": \"[後台] Postman 測試補點\",\n      \"meta\": {},\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ],\n  \"next_before_id\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "User conversations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var items = pm.response.json().items;",
+                  "pm.test(\"有與角色的對話,附角色名稱\", function () { pm.expect(items.length).to.be.above(0); pm.expect(items[0].character_name).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/users/{{userId}}/conversations",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "conversations"
+              ]
+            },
+            "description": "該使用者的對話列表,另含角色名稱與頭像。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/users/{{userId}}/conversations",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "users",
+                    "{{userId}}",
+                    "conversations"
+                  ]
+                },
+                "description": "該使用者的對話列表,另含角色名稱與頭像。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"character_id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n      \"last_message_at\": \"2026-11-08T02:15:21.231Z\",\n      \"last_preview\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"latest_seq\": 3,\n      \"created_at\": \"2026-11-08T02:15:21.231Z\",\n      \"user_id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n      \"character_name\": \"小曦\",\n      \"character_avatar\": \"🌅\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Conversation messages (⚠ 個資)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "var items = pm.response.json().items;",
+                  "pm.test(\"含 billing_state 等管理欄位\", function () { pm.expect(items[0]).to.have.property(\"billing_state\"); pm.expect(items[0]).to.have.property(\"cost\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/conversations/{{conversationId}}/messages",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversationId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "before_seq",
+                  "value": "",
+                  "disabled": true,
+                  "description": "往前翻的游標,留空取最新 100 則"
+                }
+              ]
+            },
+            "description": "對話內容。比使用者端多出 `attempt`(第幾次嘗試)、`cost`(扣點)、`billing_state`(點數狀態)。長時間停在 `*_pending` 代表結算有問題。\n\n⚠ 屬於個資,上線需權限控管與存取稽核。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/conversations/{{conversationId}}/messages",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "conversations",
+                    "{{conversationId}}",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "before_seq",
+                      "value": "",
+                      "disabled": true,
+                      "description": "往前翻的游標,留空取最新 100 則"
+                    }
+                  ]
+                },
+                "description": "對話內容。比使用者端多出 `attempt`(第幾次嘗試)、`cost`(扣點)、`billing_state`(點數狀態)。長時間停在 `*_pending` 代表結算有問題。\n\n⚠ 屬於個資,上線需權限控管與存取稽核。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"c542e5ce-3f1b-4189-84c2-ba371ef29fb2\",\n      \"conversation_id\": \"5c847329-5533-4ca3-84d4-ad55f1596b24\",\n      \"seq\": 3,\n      \"role\": \"assistant\",\n      \"content\": \"嗨,見到你真好。\",\n      \"status\": \"completed\",\n      \"error_code\": null,\n      \"attempt\": 0,\n      \"cost\": 2,\n      \"billing_state\": \"settled\",\n      \"created_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "List characters (含已下架、含人設)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"包含人設\", function () { pm.expect(pm.response.json().items[0]).to.have.property(\"persona\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/characters",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "characters"
+              ]
+            },
+            "description": "所有角色(含已下架),且包含 `persona`(system prompt)、`model`、`status`、`sort_order`。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/characters",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "characters"
+                  ]
+                },
+                "description": "所有角色(含已下架),且包含 `persona`(system prompt)、`model`、`status`、`sort_order`。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n      \"slug\": \"xi\",\n      \"name\": \"小曦\",\n      \"tagline\": \"溫柔的傾聽者,陪你說說心裡話\",\n      \"avatar\": \"🌅\",\n      \"greeting\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n      \"price\": 2,\n      \"persona\": \"你是「小曦」,一個溫暖、有耐心的傾聽者……\",\n      \"model\": null,\n      \"status\": \"active\",\n      \"sort_order\": 1,\n      \"updated_at\": \"2026-11-08T02:15:21.231Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create character",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"testSlug\", \"pm_\" + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set(\"testCharacterId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{adminUrl}}/api/characters",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "characters"
+              ]
+            },
+            "description": "新增角色。`slug` 必須唯一(`[a-z0-9_-]`,2–32 字),重複回 `409 SLUG_TAKEN`。這個請求每次執行用新的 slug。\n\n建立後下一個請求會把它下架,避免測試角色出現在使用者的列表。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"{{testSlug}}\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"測試用\",\n  \"avatar\": \"🧪\",\n  \"persona\": \"你是一個測試角色。請用繁體中文簡短回覆。\",\n  \"greeting\": \"你好,我是測試角色。\",\n  \"price\": 1,\n  \"status\": \"active\",\n  \"sort_order\": 999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "201",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{adminUrl}}/api/characters",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "characters"
+                  ]
+                },
+                "description": "新增角色。`slug` 必須唯一(`[a-z0-9_-]`,2–32 字),重複回 `409 SLUG_TAKEN`。這個請求每次執行用新的 slug。\n\n建立後下一個請求會把它下架,避免測試角色出現在使用者的列表。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slug\": \"{{testSlug}}\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"測試用\",\n  \"avatar\": \"🧪\",\n  \"persona\": \"你是一個測試角色。請用繁體中文簡短回覆。\",\n  \"greeting\": \"你好,我是測試角色。\",\n  \"price\": 1,\n  \"status\": \"active\",\n  \"sort_order\": 999\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n  \"slug\": \"pm_test\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"溫柔的傾聽者,陪你說說心裡話\",\n  \"avatar\": \"🌅\",\n  \"greeting\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n  \"price\": 2,\n  \"persona\": \"…\",\n  \"model\": null,\n  \"status\": \"active\",\n  \"sort_order\": 999,\n  \"updated_at\": \"2026-11-08T02:15:21.231Z\"\n}"
+            },
+            {
+              "name": "409 slug 重複",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{adminUrl}}/api/characters",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "characters"
+                  ]
+                },
+                "description": "新增角色。`slug` 必須唯一(`[a-z0-9_-]`,2–32 字),重複回 `409 SLUG_TAKEN`。這個請求每次執行用新的 slug。\n\n建立後下一個請求會把它下架,避免測試角色出現在使用者的列表。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slug\": \"{{testSlug}}\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"測試用\",\n  \"avatar\": \"🧪\",\n  \"persona\": \"你是一個測試角色。請用繁體中文簡短回覆。\",\n  \"greeting\": \"你好,我是測試角色。\",\n  \"price\": 1,\n  \"status\": \"active\",\n  \"sort_order\": 999\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"SLUG_TAKEN\",\n    \"message\": \"slug 已存在\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update character (整筆取代, 這裡順便下架)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"已下架\", function () { pm.expect(pm.response.json().status).to.eql(\"disabled\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{adminUrl}}/api/characters/{{testCharacterId}}",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "characters",
+                "{{testCharacterId}}"
+              ]
+            },
+            "description": "更新角色。**整筆取代**,請帶完整欄位。成功後立即清除 Redis 快取並通知各服務清本機快取,不需重啟。\n\n沒有刪除角色的端點;要讓角色消失請設 `status: \"disabled\"`(使用者列表不再出現,既有對話的歷史保留)。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"{{testSlug}}\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"已下架\",\n  \"avatar\": \"🧪\",\n  \"persona\": \"你是一個測試角色。請用繁體中文簡短回覆。\",\n  \"greeting\": \"你好,我是測試角色。\",\n  \"price\": 1,\n  \"model\": null,\n  \"status\": \"disabled\",\n  \"sort_order\": 999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{adminUrl}}/api/characters/{{testCharacterId}}",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "characters",
+                    "{{testCharacterId}}"
+                  ]
+                },
+                "description": "更新角色。**整筆取代**,請帶完整欄位。成功後立即清除 Redis 快取並通知各服務清本機快取,不需重啟。\n\n沒有刪除角色的端點;要讓角色消失請設 `status: \"disabled\"`(使用者列表不再出現,既有對話的歷史保留)。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slug\": \"{{testSlug}}\",\n  \"name\": \"Postman 測試角色\",\n  \"tagline\": \"已下架\",\n  \"avatar\": \"🧪\",\n  \"persona\": \"你是一個測試角色。請用繁體中文簡短回覆。\",\n  \"greeting\": \"你好,我是測試角色。\",\n  \"price\": 1,\n  \"model\": null,\n  \"status\": \"disabled\",\n  \"sort_order\": 999\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"00d94a49-22dc-4f54-ade1-a187d997f3cc\",\n  \"slug\": \"pm_test\",\n  \"name\": \"小曦\",\n  \"tagline\": \"溫柔的傾聽者,陪你說說心裡話\",\n  \"avatar\": \"🌅\",\n  \"greeting\": \"嗨,我是小曦。今天過得怎麼樣?想聊什麼都可以,我在這裡聽你說。\",\n  \"price\": 2,\n  \"status\": \"disabled\",\n  \"persona\": \"…\",\n  \"model\": null,\n  \"sort_order\": 999,\n  \"updated_at\": \"2026-11-08T02:15:21.231Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Characters API 看不到已下架的角色",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"錯誤碼 NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/characters/{{testCharacterId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "characters",
+                "{{testCharacterId}}"
+              ]
+            },
+            "description": "剛才下架的角色,使用者端查詢回 404。(伺服器端快取已被後台修改時主動清除,所以立即生效。)"
+          },
+          "response": [
+            {
+              "name": "404",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/characters/{{testCharacterId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "characters",
+                    "{{testCharacterId}}"
+                  ]
+                },
+                "description": "剛才下架的角色,使用者端查詢回 404。(伺服器端快取已被後台修改時主動清除,所以立即生效。)"
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"角色不存在\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Force logout (強制登出)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"revoked\", function () { pm.expect(pm.response.json().revoked).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{adminUrl}}/api/users/{{userId}}/logout",
+              "host": [
+                "{{adminUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "logout"
+              ]
+            },
+            "description": "強制登出使用者。他在線的裝置會立即收到 `session_replaced`(`reason: \"revoked\"`)。\n\n⚠ 在這個 Collection 裡,這會讓 `{{token}}` 失效;接下來的 `Account` 資料夾會重新登入。",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{adminUrl}}/api/users/{{userId}}/logout",
+                  "host": [
+                    "{{adminUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "users",
+                    "{{userId}}",
+                    "logout"
+                  ]
+                },
+                "description": "強制登出使用者。他在線的裝置會立即收到 `session_replaced`(`reason: \"revoked\"`)。\n\n⚠ 在這個 Collection 裡,這會讓 `{{token}}` 失效;接下來的 `Account` 資料夾會重新登入。",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"revoked\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "驗證被強制登出後 token 失效",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"錯誤碼 SESSION_EXPIRED\", function () { pm.expect(pm.response.json().error.code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "被後台強制登出後,使用者端的 token 回 `401 SESSION_EXPIRED`。"
+          },
+          "response": [
+            {
+              "name": "401",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "被後台強制登出後,使用者端的 token 回 `401 SESSION_EXPIRED`。"
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"SESSION_EXPIRED\",\n    \"message\": \"登入已失效,請重新登入\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "description": "帳號刪除。放在最後,因為它會永久刪除這次的測試帳號。",
+      "item": [
+        {
+          "name": "Login (重新登入)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "被後台強制登出後重新登入,以便示範刪除帳號。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "被後台強制登出後重新登入,以便示範刪除帳號。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…(JWT)…\",\n  \"expires_in\": 604800,\n  \"user\": {\n    \"id\": \"c65f351c-1b91-47d9-81aa-deded7f009a5\",\n    \"username\": \"pm_mw779re9\",\n    \"nickname\": \"pm_mw779re9\"\n  },\n  \"session\": {\n    \"sid\": \"fe923200-1478-4fc4-a671-411ddf894c97\",\n    \"device_name\": \"Postman (裝置 B)\"\n  },\n  \"replaced_device\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete account (⚠ 永久)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"ok\", function () { pm.expect(pm.response.json().ok).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "**永久刪除帳號**,需要再輸入一次密碼確認。**這個 DELETE 帶有 body。**\n\n帳號資料立即刪除;對話、訊息、點數明細由事件非同步清除。刪除後原 token 失效,也無法再用原帳密登入。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "**永久刪除帳號**,需要再輸入一次密碼確認。**這個 DELETE 帶有 body。**\n\n帳號資料立即刪除;對話、訊息、點數明細由事件非同步清除。刪除後原 token 失效,也無法再用原帳密登入。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"password\": \"{{password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"ok\": true\n}"
+            },
+            {
+              "name": "403 密碼錯誤",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "**永久刪除帳號**,需要再輸入一次密碼確認。**這個 DELETE 帶有 body。**\n\n帳號資料立即刪除;對話、訊息、點數明細由事件非同步清除。刪除後原 token 失效,也無法再用原帳密登入。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"password\": \"{{password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_CREDENTIALS\",\n    \"message\": \"密碼錯誤\"\n  }\n}"
+            },
+            {
+              "name": "400 缺少 password",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "me"
+                  ]
+                },
+                "description": "**永久刪除帳號**,需要再輸入一次密碼確認。**這個 DELETE 帶有 body。**\n\n帳號資料立即刪除;對話、訊息、點數明細由事件非同步清除。刪除後原 token 失效,也無法再用原帳密登入。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"password\": \"{{password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_REQUEST\",\n    \"message\": \"password:Required\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "驗證刪除後無法再登入",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"狀態碼 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"錯誤碼 INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().error.code).to.eql(\"INVALID_CREDENTIALS\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "帳號已刪除,原帳密登入失敗。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "401",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "帳號已刪除,原帳密登入失敗。",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"postman-device-b\",\n  \"device_name\": \"Postman (裝置 B)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_CREDENTIALS\",\n    \"message\": \"帳號或密碼錯誤\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
