@@ -1,4 +1,4 @@
-import type { Logger } from '../../../../shared/log';
+import type { Logger } from '../log';
 import {
   isConfigError,
   LlmError,

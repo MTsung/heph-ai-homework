@@ -10,7 +10,7 @@ import { CacheStats, createRedis, subscribe } from '../../../shared/redis';
 import { CharacterDirectory } from './characters';
 import { createMetrics, genStreamKey, llmHooks, lockKey, loadConfig, type Deps } from './deps';
 import { GenerationManager } from './generation';
-import { createLlm, Semaphore } from './llm';
+import { createLlm, Semaphore } from '../../../shared/llm';
 import { migrations } from './migrations';
 import { Reaper } from './reaper';
 import { RecentCache } from './recent';

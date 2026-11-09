@@ -10,7 +10,7 @@ import { releaseOrDefer } from './billing';
 import type { CharacterInfo } from './characters';
 import { genStreamKey, lockKey, type Deps } from './deps';
 import { Generation, GenerationManager, type GenEvent } from './generation';
-import type { ChatMsg } from './llm';
+import type { ChatMsg } from '../../../shared/llm';
 import type { MessageDto } from './recent';
 
 interface MessageRow {

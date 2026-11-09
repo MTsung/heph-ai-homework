@@ -1,5 +1,5 @@
-import { env, envInt } from '../../../../shared/config';
-import type { Logger } from '../../../../shared/log';
+import { env, envInt } from '../config';
+import type { Logger } from '../log';
 import { FailoverProvider, type LlmHooks } from './failover';
 import { GeminiProvider } from './gemini';
 import { MockProvider } from './mock';

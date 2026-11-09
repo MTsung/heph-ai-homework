@@ -7,7 +7,7 @@
 // 想單獨測某一家(略過備援),臨時指定:
 //   docker compose exec -e LLM_PROVIDERS=gemini chat bun scripts/llm-ping.ts
 export {};
-import { createLlm } from '../services/chat/src/llm';
+import { createLlm } from '../shared/llm';
 import { createLogger } from '../shared/log';
 
 const text = process.argv.slice(2).join(' ') || '你好,請用一句話自我介紹。';

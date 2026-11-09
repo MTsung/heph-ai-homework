@@ -1,4 +1,4 @@
-import { envInt } from '../../../../shared/config';
+import { envInt } from '../config';
 import { LlmError, sleep, type ChatMsg, type LlmProvider, type LlmRequest, type LlmResult } from './types';
 
 // ============================================================================

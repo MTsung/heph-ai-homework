@@ -2,7 +2,7 @@ import { extendLock, releaseLock } from '../../../shared/redis';
 import { markFailed, releaseHold, settleHold } from './billing';
 import type { CharacterInfo } from './characters';
 import { genStreamKey, lockKey, type Deps } from './deps';
-import { LlmError, type ChatMsg, type LlmResult } from './llm';
+import { LlmError, type ChatMsg, type LlmResult } from '../../../shared/llm';
 import type { MessageDto } from './recent';
 
 export type GenEvent =

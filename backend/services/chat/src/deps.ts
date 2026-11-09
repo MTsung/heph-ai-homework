@@ -5,7 +5,7 @@ import type { ServiceClient } from '../../../shared/client';
 import { envInt } from '../../../shared/config';
 import type { Logger } from '../../../shared/log';
 import type { CharacterDirectory } from './characters';
-import type { LlmHooks, LlmProvider, Semaphore } from './llm';
+import type { LlmHooks, LlmProvider, Semaphore } from '../../../shared/llm';
 import type { RecentCache } from './recent';
 
 export interface ChatConfig {
