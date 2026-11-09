@@ -38,14 +38,10 @@ class ApiClient {
   /// 任何請求收到 401(登入失效)時通知上層
   void Function(ApiException error)? onAuthFailure;
 
-  Map<String, String> get _headers => {
-        'content-type': 'application/json',
-        if (token != null) 'authorization': 'Bearer $token',
-      };
+  Map<String, String> get _headers => {'content-type': 'application/json', if (token != null) 'authorization': 'Bearer $token'};
 
-  Uri _uri(String path, [Map<String, dynamic>? query]) => Uri.parse('$baseUrl/v1$path').replace(
-        queryParameters: query?.map((k, v) => MapEntry(k, v.toString())),
-      );
+  Uri _uri(String path, [Map<String, dynamic>? query]) =>
+      Uri.parse('$baseUrl/v1$path').replace(queryParameters: query?.map((k, v) => MapEntry(k, v.toString())));
 
   Future<Map<String, dynamic>> _json(http.Response res) async {
     final body = utf8.decode(res.bodyBytes);
@@ -57,12 +53,7 @@ class ApiClient {
   ApiException _toException(int status, Object? decoded) {
     final err = (decoded is Map ? decoded['error'] : null);
     final e = err is Map
-        ? ApiException(
-            status,
-            '${err['code'] ?? 'ERROR'}',
-            '${err['message'] ?? '發生錯誤'}',
-            err.cast<String, dynamic>(),
-          )
+        ? ApiException(status, '${err['code'] ?? 'ERROR'}', '${err['message'] ?? '發生錯誤'}', err.cast<String, dynamic>())
         : ApiException(status, 'ERROR', '發生錯誤($status)');
     if (e.isAuthFailure) onAuthFailure?.call(e);
     return e;
@@ -80,9 +71,20 @@ class ApiClient {
 
   Future<Map<String, dynamic>> post(String path, [Object? body]) async {
     try {
-      return await _json(await _client
-          .post(_uri(path), headers: _headers, body: jsonEncode(body ?? {}))
-          .timeout(const Duration(seconds: 15)));
+      return await _json(await _client.post(_uri(path), headers: _headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15)));
+    } on TimeoutException {
+      throw ApiException(0, 'TIMEOUT', '連線逾時,請檢查網路');
+    } on http.ClientException catch (e) {
+      throw ApiException(0, 'NETWORK', '無法連線到伺服器:${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> patch(String path, [Object? body]) async {
+    try {
+      final req = http.Request('PATCH', _uri(path))
+        ..headers.addAll(_headers)
+        ..body = jsonEncode(body ?? {});
+      return await _json(await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 15))));
     } on TimeoutException {
       throw ApiException(0, 'TIMEOUT', '連線逾時,請檢查網路');
     } on http.ClientException catch (e) {

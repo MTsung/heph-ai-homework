@@ -7,7 +7,7 @@ import { SseStream } from '../../../shared/sse';
 import { SessionGuard } from './session';
 import { Upstream } from './upstream';
 
-type Target = 'auth' | 'character' | 'chat' | 'billing';
+type Target = 'auth' | 'character' | 'chat' | 'billing' | 'booking';
 
 interface Route {
   /** 對外路徑前綴(不含 /v1) */
@@ -26,6 +26,7 @@ const ROUTES: Route[] = [
   { prefix: '/characters', target: 'character' },
   { prefix: '/conversations', target: 'chat' },
   { prefix: '/points', target: 'billing' },
+  { prefix: '/bookings', target: 'booking' },
 ];
 
 const HOP_BY_HOP = new Set([
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
     character: new Upstream('character', urls.character(), log),
     chat: new Upstream('chat', urls.chat(), log),
     billing: new Upstream('billing', urls.billing(), log),
+    booking: new Upstream('booking', urls.booking(), log),
   };
   Object.values(upstreams).forEach((u) => u.start());
 
@@ -72,6 +74,8 @@ async function main(): Promise<void> {
     authPerIpPerMin: envInt('RL_AUTH_PER_IP_PER_MIN', 30),
     userPerMin: envInt('RL_USER_PER_MIN', 600),
     sendPerMin: envInt('RL_SEND_PER_USER_PER_MIN', 30),
+    // 訂位的寫入操作(建立 / 回覆 / 確認…)每次都可能呼叫模型或搜尋,另外限流
+    bookingPerMin: envInt('RL_BOOKING_PER_USER_PER_MIN', 30),
   };
 
   async function enforce(key: string, limit: number): Promise<void> {
@@ -180,6 +184,7 @@ async function main(): Promise<void> {
     const identity = await guard.authenticate(c.req.header('authorization'));
     await enforce(`u:${identity.userId}`, limits.userPerMin);
     if (c.req.method === 'POST' && SEND_RE.test(path)) await enforce(`send:${identity.userId}`, limits.sendPerMin);
+    if (route.target === 'booking' && c.req.method !== 'GET') await enforce(`booking:${identity.userId}`, limits.bookingPerMin);
     return proxy(c, route, path, identity);
   });
 

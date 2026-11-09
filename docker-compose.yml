@@ -1,5 +1,12 @@
 name: chat-app
 
+# 訂位代辦(AI 代辦)是擴充功能,服務定義放在 backend/booking/docker-compose.booking.yml。
+# include 進同一個專案:共用網路、PostgreSQL、Redis;gateway / admin 照常依賴 booking 與 browser-agent-artifacts。
+include:
+  - path: backend/booking/docker-compose.booking.yml
+    project_directory: backend/booking
+    env_file: .env
+
 # 所有 Bun 服務共用的設定
 x-bun: &bun
   image: chat-app/backend:local
@@ -20,6 +27,8 @@ x-bun: &bun
     CHARACTER_URL: http://character:3002
     CHAT_URL: http://chat:3003
     BILLING_URL: http://billing:3004
+    BOOKING_URL: http://booking:3005
+    BROWSER_AGENT_URL: http://browser-agent:3010
 
 x-infra-ready: &infra-ready
   postgres:
@@ -42,6 +51,7 @@ services:
       RL_AUTH_PER_IP_PER_MIN: ${RL_AUTH_PER_IP_PER_MIN:-30}
       RL_USER_PER_MIN: ${RL_USER_PER_MIN:-600}
       RL_SEND_PER_USER_PER_MIN: ${RL_SEND_PER_USER_PER_MIN:-30}
+      RL_BOOKING_PER_USER_PER_MIN: ${RL_BOOKING_PER_USER_PER_MIN:-30}
     ports:
       - "8080:8080"
     depends_on:
@@ -50,6 +60,7 @@ services:
       chat: { condition: service_healthy }
       billing: { condition: service_healthy }
       character: { condition: service_healthy }
+      booking: { condition: service_healthy }
     healthcheck: &hc8080
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -63,6 +74,9 @@ services:
       <<: *bun-env
       SERVICE: admin
       PORT: "8090"
+      BROWSER_AGENT_ARTIFACT_DIR: /var/lib/browser-agent/artifacts
+    volumes:
+      - browser-agent-artifacts:/var/lib/browser-agent/artifacts:ro
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:
@@ -243,6 +257,8 @@ services:
     environment:
       <<: *bun-env
       GATEWAY_URL: http://gateway:8080
+      SIM_URL: http://booking-sim:9100 # 訂位擴充的冒煙測試:bun booking/scripts/booking-smoke.ts
+      BOOKING_DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/booking
     depends_on:
       gateway: { condition: service_healthy }
     entrypoint: []

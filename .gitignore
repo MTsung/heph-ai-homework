@@ -12,3 +12,6 @@ app/**/Pods/
 
 # 題目 PDF:僅放本機參考,不納入版控
 assignments/
+
+# 本機資料庫備份(含個資)
+.db-backup/

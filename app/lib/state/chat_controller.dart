@@ -16,12 +16,7 @@ import '../models/models.dart';
 ///  - 串流和連線脫鉤:伺服器端會把回覆生成完。畫面這邊斷線(切換對話、網路中斷)時,
 ///    用 /stream 續傳端點接回來,先收到 snapshot(斷線期間累積的內容),再繼續收後續片段。
 class ChatController extends ChangeNotifier {
-  ChatController({
-    required this.api,
-    required this.conversationId,
-    required this.onBalance,
-    required this.onPreview,
-  });
+  ChatController({required this.api, required this.conversationId, required this.onBalance, required this.onPreview});
 
   final ApiClient api;
   final String conversationId;
@@ -103,6 +98,13 @@ class ChatController extends ChangeNotifier {
     } on ApiException {
       /* 靜默失敗 */
     }
+  }
+
+  /// 顯示由上層分流(例如訂位服務)造成的送出錯誤,維持一般聊天原本的錯誤呈現方式。
+  void showExternalError(String message) {
+    sendError = message;
+    insufficientPoints = false;
+    notifyListeners();
   }
 
   // ------------------------------------------------------------------ 送出

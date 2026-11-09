@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { resolve, relative, sep } from 'node:path';
 import { buildApp, onShutdown, readJson } from '../../../shared/app';
 import { ServiceClient } from '../../../shared/client';
-import { envInt, urls } from '../../../shared/config';
+import { env, envInt, urls } from '../../../shared/config';
 import { Errors, parse } from '../../../shared/errors';
 import { createRedis } from '../../../shared/redis';
 
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   const character = new ServiceClient('character', urls.character(), 5000);
   const chat = new ServiceClient('chat', urls.chat(), 5000);
   const billing = new ServiceClient('billing', urls.billing(), 5000);
+  const booking = new ServiceClient('booking', urls.booking(), 5000);
 
   const { app, log, listen } = buildApp({
     service: 'admin',
@@ -28,6 +30,7 @@ async function main(): Promise<void> {
 
   const uuid = z.string().uuid();
   const html = Bun.file(new URL('../public/index.html', import.meta.url).pathname);
+  const artifactRoot = resolve(env('BROWSER_AGENT_ARTIFACT_DIR', '/var/lib/browser-agent/artifacts'));
 
   app.get('/', async () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }));
 
@@ -118,6 +121,11 @@ async function main(): Promise<void> {
     return c.json(await billing.get('/internal/ledger', { query: { user_id: id, before_id: before, limit: 50 } }));
   });
 
+  app.get('/api/users/:id/bookings', async (c) => {
+    const id = parse(uuid, c.req.param('id'));
+    return c.json(await booking.get('/internal/bookings', { query: { user_id: id, limit: 30 } }));
+  });
+
   app.get('/api/users/:id/conversations', async (c) => {
     const id = parse(uuid, c.req.param('id'));
     const [convs, chars] = await Promise.all([
@@ -132,6 +140,39 @@ async function main(): Promise<void> {
         character_avatar: byId.get(cv.character_id)?.avatar ?? '',
       })),
     });
+  });
+
+  // ---------------------------------------------------------------- browser-use 開發執行紀錄(僅本機後台)
+  async function traceManifest(id: string): Promise<{ trace: { manifest?: string; enabled?: boolean }; manifest: Record<string, unknown> }> {
+    const detail = await booking.get<{ result?: { trace?: { manifest?: string; enabled?: boolean } } }>(`/internal/bookings/${id}`);
+    const trace = detail.result?.trace;
+    if (!trace?.enabled || !trace.manifest) throw Errors.notFound('此訂位沒有 browser agent 執行紀錄');
+    // manifest 路徑只能是 worker 產生的 bookings/{booking-id}/{run-id}/manifest.json，不能信任 URL 參數。
+    if (!new RegExp(`^bookings/${id}/[0-9a-f-]{36}/manifest\\.json$`).test(trace.manifest)) throw Errors.notFound('執行紀錄路徑無效');
+    const file = resolve(artifactRoot, trace.manifest);
+    if (relative(artifactRoot, file).startsWith(`..${sep}`)) throw Errors.notFound('執行紀錄路徑無效');
+    const text = await Bun.file(file).text();
+    if (!text) throw Errors.notFound('找不到執行紀錄');
+    return { trace, manifest: JSON.parse(text) as Record<string, unknown> };
+  }
+
+  app.get('/api/bookings/:id/browser-trace', async (c) => c.json(await traceManifest(parse(uuid, c.req.param('id')))));
+
+  app.get('/api/bookings/:id/browser-trace/screens/:sequence', async (c) => {
+    const id = parse(uuid, c.req.param('id'));
+    const sequence = parse(z.coerce.number().int().min(1).max(1000), c.req.param('sequence'));
+    const { trace, manifest } = await traceManifest(id);
+    const shots = Array.isArray(manifest.screenshots) ? manifest.screenshots : [];
+    const shot = shots.find((v): v is { sequence: number; path: string } =>
+      typeof v === 'object' && v !== null && (v as { sequence?: unknown }).sequence === sequence && typeof (v as { path?: unknown }).path === 'string',
+    );
+    if (!shot || !trace.manifest) throw Errors.notFound('找不到這一張截圖');
+    const file = resolve(artifactRoot, trace.manifest, '..', shot.path);
+    const runDir = resolve(artifactRoot, trace.manifest, '..');
+    if (!/^screenshots\/\d{4}\.png$/.test(shot.path) || relative(runDir, file).startsWith(`..${sep}`)) throw Errors.notFound('截圖路徑無效');
+    const image = Bun.file(file);
+    if (!(await image.exists())) throw Errors.notFound('找不到截圖檔');
+    return new Response(image, { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
   });
 
   app.get('/api/conversations/:id/messages', async (c) => {

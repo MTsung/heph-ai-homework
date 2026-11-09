@@ -1,0 +1,3 @@
+browser-use[core]==0.13.14
+fastapi==0.128.0
+uvicorn==0.40.0

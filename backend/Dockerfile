@@ -16,7 +16,9 @@ COPY package.json ./
 COPY shared ./shared
 COPY services ./services
 COPY scripts ./scripts
+# 訂位代辦(擴充):獨立目錄,共用 shared/ 與同一個 image
+COPY booking ./booking
 USER bun
-# 預設用 SERVICE 指定;compose 內每個服務都會設定
-ENV SERVICE=gateway
-CMD ["sh", "-c", "exec bun services/${SERVICE}/src/main.ts"]
+# 預設用 SERVICE 指定;compose 內每個服務都會設定。訂位擴充的服務另設 SERVICE_ROOT=booking/services
+ENV SERVICE=gateway SERVICE_ROOT=services
+CMD ["sh", "-c", "exec bun ${SERVICE_ROOT}/${SERVICE}/src/main.ts"]

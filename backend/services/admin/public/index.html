@@ -81,18 +81,27 @@ function closeModal() { $('#modal').classList.remove('on'); }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 
 let timer = null;
+let viewVersion = 0;
 const tabs = { overview, users, characters };
 $('#nav').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.tab); });
 function go(tab) {
+  const version = ++viewVersion;
   clearInterval(timer);
+  timer = null;
   document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  tabs[tab]().catch((e) => ($('#app').innerHTML = `<div class="card">載入失敗:${esc(e.message)}</div>`));
+  // 舊頁面尚未完成的 fetch 可能晚一步回來;只有目前這一次導航才可以改 DOM。
+  tabs[tab]().catch((e) => {
+    if (version === viewVersion) $('#app').innerHTML = `<div class="card">載入失敗:${esc(e.message)}</div>`;
+  });
 }
 
 // ------------------------------------------------------------------ 總覽
 async function overview() {
+  const version = viewVersion;
   async function render() {
     const d = await api('GET', '/overview');
+    // clearInterval 不能取消已經開始等待 HTTP 回應的 render;靠世代值阻擋它覆蓋新頁籤。
+    if (version !== viewVersion) return;
     const a = d.auth, c = d.chat, b = d.billing;
     const card = (k, v, s = '') => `<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
     const redisCard = (name, r) => r.error ? `<div class="card">${name}:${esc(r.error)}</div>` : `<div class="card stat"><div class="k">${name}</div><div class="v">${esc(r.used_memory)}</div>
@@ -120,7 +129,7 @@ async function overview() {
       <p class="muted">每 5 秒自動更新 · ${new Date().toLocaleTimeString('zh-TW', { hour12: false })}</p>`;
   }
   await render();
-  timer = setInterval(() => render().catch(() => {}), 5000);
+  if (version === viewVersion) timer = setInterval(() => void render().catch(() => {}), 5000);
 }
 
 // ------------------------------------------------------------------ 使用者
@@ -138,7 +147,7 @@ async function users(q = '') {
 }
 
 async function userDetail(id) {
-  const [list, ledger, convs] = await Promise.all([api('GET', '/users?q='), api('GET', `/users/${id}/ledger`), api('GET', `/users/${id}/conversations`)]);
+  const [list, ledger, convs, books] = await Promise.all([api('GET', '/users?q='), api('GET', `/users/${id}/ledger`), api('GET', `/users/${id}/conversations`), api('GET', `/users/${id}/bookings`).catch(() => ({ items: [] }))]);
   const u = list.items.find((x) => x.id === id) || { username: id, nickname: '', points: null };
   $('#app').innerHTML = `
     <span class="back" id="back">← 回使用者列表</span>
@@ -158,7 +167,12 @@ async function userDetail(id) {
       <div><h2>對話</h2>
         <table><tr><th>角色</th><th>最後訊息</th><th>則數</th></tr>
         ${convs.items.map((c) => `<tr class="click" data-c="${c.id}" data-n="${esc(c.character_name)}"><td>${esc(c.character_avatar)} ${esc(c.character_name)}</td><td class="muted">${esc(c.last_preview)}</td><td>${c.latest_seq}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">無對話</td></tr>'}</table></div>
-    </div>`;
+    </div>
+    <h2>訂位代辦</h2>
+    <table><tr><th>時間</th><th>需求</th><th>狀態</th><th>結果</th></tr>
+    ${books.items.map((b) => `<tr class="click" data-b="${b.id}"><td class="muted">${time(b.created_at)}</td><td>${esc(b.summary)}<div class="muted" style="font-size:11px">${esc(b.id)}</div></td>
+      <td><span class="tag ${{ succeeded: 'ok', failed: 'bad', unknown: 'warn', expired: '', cancelled: '' }[b.status] ?? ''}">${esc({ collecting: '補資料中', awaiting_confirmation: '待確認', confirmed: '已確認', executing: '送出中', succeeded: '成功', failed: '失敗', unknown: '結果不明', cancelled: '已取消', expired: '已過期' }[b.status] || b.status)}</span></td>
+      <td class="muted">${b.result ? (b.result.ok ? '訂位代號 ' + esc(b.result.confirmation_no) : esc(b.result.code) + ':' + esc(b.result.message)) : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">無訂位紀錄</td></tr>'}</table>`;
   $('#back').onclick = () => go('users');
   $('#grant').onclick = () => modal(`<h3 style="margin-top:0">補點給 ${esc(u.username)}</h3>
     <label>點數</label><input id="gAmt" type="number" min="1" value="100">
@@ -170,7 +184,18 @@ async function userDetail(id) {
     api('POST', `/users/${id}/grant`, { amount: +$('#gAmt').value, reason: $('#gWhy').value }).then(() => { closeModal(); toast('已補點'); userDetail(id); }).catch((er) => toast(er.message));
   });
   $('#kick').onclick = () => api('POST', `/users/${id}/logout`).then(() => { toast('已強制登出'); userDetail(id); }).catch((er) => toast(er.message));
-  document.querySelectorAll('tr.click').forEach((tr) => (tr.onclick = () => conversation(id, tr.dataset.c, tr.dataset.n)));
+  document.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => conversation(id, tr.dataset.c, tr.dataset.n)));
+  document.querySelectorAll('tr[data-b]').forEach((tr) => (tr.onclick = () => browserTrace(id, tr.dataset.b)));
+}
+
+async function browserTrace(userId, bookingId) {
+  const d = await api('GET', `/bookings/${bookingId}/browser-trace`);
+  const m = d.manifest;
+  $('#app').innerHTML = `<span class="back" id="back">← 回使用者</span><h2 style="margin-top:0">Browser Agent 執行紀錄</h2>
+    <p class="muted">開發模式：截圖可能含姓名、電話與 email，請勿對外分享。</p>
+    <div class="card"><b>訂位 ${esc(m.booking_id)}</b><div class="muted">Run ${esc(m.run_id)} · ${time(m.started_at)} · ${m.steps?.length || 0} 個步驟 / ${m.screenshots?.length || 0} 張截圖 · ${esc(m.status || 'completed')}</div>${m.status === 'failed' ? `<div class="tag bad" style="margin-top:8px">browser 啟動或執行失敗：${esc(m.error_class || 'UnknownError')}；${m.screenshots?.length ? '已保留失敗前的截圖。' : '失敗前未取得任何截圖。'}</div>` : ''}</div>
+    <div class="chat" style="max-height:none;margin-top:14px">${(m.steps || []).map((s) => `<div style="padding:12px 0;border-bottom:1px solid var(--line)"><b>#${s.sequence}</b> ${esc(s.action || '無動作')} ${s.error ? `<span class="tag bad">${esc(s.error)}</span>` : ''}<div class="muted" style="font-size:12px">${esc(s.url || '')}</div>${s.screenshot ? `<img src="/api/bookings/${bookingId}/browser-trace/screens/${s.sequence}" style="display:block;max-width:100%;margin-top:8px;border:1px solid var(--line);border-radius:8px" loading="lazy">` : ''}</div>`).join('') || `<div class="muted">${m.status === 'failed' ? 'browser 在產生第一個可保存步驟前失敗，因此沒有截圖。' : 'agent 未產生可保存的步驟或截圖'}</div>`}</div>`;
+  $('#back').onclick = () => userDetail(userId);
 }
 
 async function conversation(userId, cid, name) {

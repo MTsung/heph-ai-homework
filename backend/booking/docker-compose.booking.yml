@@ -1,0 +1,131 @@
+# 訂位代辦(AI 代辦)擴充:booking、booking-sim、browser-agent。
+# 由根目錄的 docker-compose.yml 以 `include` 載入,與 Chat APP 共用同一個專案、網路、PostgreSQL 與 Redis。
+# 本檔內的相對路徑以 backend/booking/ 為基準;變數由根目錄 .env 提供(見根目錄 include 的 env_file)。
+# 設計見 docs/booking/DECISIONS.md
+
+x-bun: &bun
+  image: chat-app/backend:local
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  stop_grace_period: 35s
+  init: true
+
+x-bun-env: &bun-env
+  NODE_ENV: ${NODE_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  REDIS_URL: redis://redis-state:6379
+  REDIS_CACHE_URL: redis://redis-cache:6379
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token-change-me}
+  JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
+  AUTH_URL: http://auth:3001
+  CHARACTER_URL: http://character:3002
+  CHAT_URL: http://chat:3003
+  BILLING_URL: http://billing:3004
+  BOOKING_URL: http://booking:3005
+  BROWSER_AGENT_URL: http://browser-agent:3010
+  # 訂位擴充的 Bun 服務放在 backend/booking/services/
+  SERVICE_ROOT: booking/services
+
+services:
+  # AI 代辦:訂餐廳。理解需求 → 找店 → 補齊資料 → 使用者確認方案 → 送出訂位 → 查進度。
+  # 對外 API 經 gateway 的 /v1/bookings。
+  booking:
+    <<: *bun
+    environment:
+      <<: *bun-env
+      SERVICE: booking
+      PORT: "3005"
+      DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/booking
+      SIM_URL: http://booking-sim:9100 # 目前的「Google 搜尋 / 餐廳網頁 / 訂位平台」都是模擬器
+      # 真實瀏覽器目標:享樂地圖(JoyMap)測試店家。worker 只有收到已確認方案才會開瀏覽器。
+      BROWSER_BOOKING_URL: ${BROWSER_BOOKING_URL:-https://www.joymap.tw/store/jump888}
+      # --- 需求理解:LLM_PROVIDERS 設成真實模型才會用 LLM;預設 mock → 用規則解析,不需要任何金鑰 ---
+      # BOOKING_NLU=rules 可強制只用規則(即使設了金鑰)
+      BOOKING_NLU: ${BOOKING_NLU:-llm}
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-}
+      GEMINI_THINKING: ${GEMINI_THINKING:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      LLM_ATTEMPT_FIRST_TOKEN_MS: ${LLM_ATTEMPT_FIRST_TOKEN_MS:-}
+      LLM_STALL_MS: ${LLM_STALL_MS:-}
+      LLM_BREAKER_FAILURES: ${LLM_BREAKER_FAILURES:-}
+      LLM_BREAKER_COOLDOWN_MS: ${LLM_BREAKER_COOLDOWN_MS:-}
+      # --- 產品規則(空白 = 程式內預設值,見 backend/booking/services/booking/src/deps.ts) ---
+      PLAN_TTL_SEC: ${PLAN_TTL_SEC:-}
+      COST_TURN: ${COST_TURN:-}
+      COST_BOOK: ${COST_BOOK:-}
+      MAX_CONCURRENT_BOOKINGS: ${MAX_CONCURRENT_BOOKINGS:-}
+      SUBMIT_TIMEOUT_MS: ${SUBMIT_TIMEOUT_MS:-}
+      PG_POOL_MAX: ${BOOKING_PG_POOL_MAX:-20}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis-state: { condition: service_healthy }
+      redis-cache: { condition: service_healthy }
+      billing: { condition: service_healthy }
+      booking-sim: { condition: service_healthy }
+      browser-agent: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3005/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 訂位世界的模擬器:假的 Google 搜尋、各家餐廳的訂位網頁(欄位 / 必填各不同)、合作訂位平台 API,
+  # 並內建客滿 / 處理很慢 / 成功了但回應沒回來 / 平台第一次回 503 等故障行為。見 services/booking-sim/
+  booking-sim:
+    <<: *bun
+    environment:
+      SERVICE: booking-sim
+      SERVICE_ROOT: booking/services
+      PORT: "9100"
+      SIM_PUBLIC_URL: http://booking-sim:9100
+      SIM_SUBMIT_DELAY_MS: ${SIM_SUBMIT_DELAY_MS:-2500}
+    ports:
+      - "127.0.0.1:9190:9100" # 只綁本機,方便手動看 /__debug/reservations(9100 常被 Flutter 開發伺服器佔用,所以對外用 9190)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # browser-use agent(Python):只處理 booking 已確認、已有 URL 的方案。
+  # 目前 allowlist 只有 BROWSER_BOOKING_URL(享樂地圖 JoyMap 測試店家)。
+  browser-agent:
+    build:
+      context: ./services/browser-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    ipc: host
+    environment:
+      PORT: "3010"
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token-change-me}
+      BROWSER_BOOKING_URL: ${BROWSER_BOOKING_URL:-https://www.joymap.tw/store/jump888}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      BROWSER_AGENT_MODEL: ${BROWSER_AGENT_MODEL:-gemini-2.5-flash}
+      BROWSER_AGENT_MAX_STEPS: ${BROWSER_AGENT_MAX_STEPS:-45}
+      BROWSER_AGENT_TRACE_ENABLED: ${BROWSER_AGENT_TRACE_ENABLED:-true}
+      BROWSER_AGENT_ARTIFACT_DIR: /var/lib/browser-agent/artifacts
+      # 確認方案後是否可按最終訂位。預設關閉;實驗時在 .env 設 true。
+      BROWSER_AGENT_SUBMIT_ENABLED: ${BROWSER_AGENT_SUBMIT_ENABLED:-false}
+    volumes:
+      - browser-agent-artifacts:/var/lib/browser-agent/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3010/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  # 瀏覽器操作的截圖與 manifest(含個資,只在本機後台查看)。admin 以唯讀掛載。
+  browser-agent-artifacts:

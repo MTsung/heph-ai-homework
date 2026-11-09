@@ -6,7 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_client.dart';
+import '../api/booking_api.dart';
+import '../models/booking_models.dart';
 import '../models/models.dart';
+import 'booking_controller.dart';
 import 'chat_controller.dart';
 
 /// 為什麼目前沒有登入
@@ -35,6 +38,10 @@ class AppState extends ChangeNotifier {
   Balance? balance;
   String? selectedCharacterId;
   ChatController? chat;
+  late final BookingApi bookingApi = BookingApi(api);
+  BookingController? booking;
+  List<BookingSummary> activeBookings = [];
+  bool showingBooking = false;
 
   bool bootstrapping = true;
 
@@ -132,7 +139,11 @@ class AppState extends ChangeNotifier {
     _events?.cancel();
     _eventsRetry?.cancel();
     chat?.dispose();
+    booking?.dispose();
     chat = null;
+    booking = null;
+    activeBookings = [];
+    showingBooking = false;
     api.token = null;
     _prefs.remove('token');
     userId = null;
@@ -193,6 +204,8 @@ class AppState extends ChangeNotifier {
       for (final c in (results[1]['items'] as List).map((e) => ConversationSummary.fromJson((e as Map).cast()))) c.characterId: c,
     };
     balance = Balance.fromJson(results[2]);
+    // 訂位入口失敗不應阻斷既有聊天首頁;使用者稍後開啟或重新整理會再讀。
+    activeBookings = await bookingApi.active().catchError((_) => <BookingSummary>[]);
   }
 
   Future<void> refreshBalance() async {
@@ -209,10 +222,53 @@ class AppState extends ChangeNotifier {
     return (res['items'] as List).map((e) => LedgerEntry.fromJson((e as Map).cast())).toList();
   }
 
+  // ------------------------------------------------------------------ 訂位代辦
+  /// 在一般聊天送出前做免費意圖判斷。回傳 true 代表已經切換到訂位流程,呼叫端不可再送進 chat SSE。
+  Future<bool> startBookingIfNeeded(String text) async {
+    if (text.trim().isEmpty) return false;
+    if (!await bookingApi.detect(text)) return false;
+    final id = '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
+    final initial = await bookingApi.create(text, id);
+    _showBooking(initial);
+    return true;
+  }
+
+  Future<void> openBooking(String id) async {
+    try {
+      _showBooking(await bookingApi.get(id));
+    } on ApiException catch (e) {
+      lastError = e.message;
+      notifyListeners();
+    }
+  }
+
+  void showChat() {
+    showingBooking = false;
+    notifyListeners();
+  }
+
+  void _showBooking(BookingView initial) {
+    booking?.dispose();
+    booking = BookingController(api: bookingApi, initial: initial, onBalance: refreshBalance, onChanged: () => _refreshActiveBookings());
+    showingBooking = true;
+    _refreshActiveBookings();
+    notifyListeners();
+  }
+
+  Future<void> _refreshActiveBookings() async {
+    try {
+      activeBookings = await bookingApi.active();
+      if (!showingBooking) notifyListeners();
+    } on ApiException {
+      /* 不影響既有畫面 */
+    }
+  }
+
   // ------------------------------------------------------------------ 選角色 → 開啟對話
   Future<void> openCharacter(Character c) async {
     if (selectedCharacterId == c.id && chat != null) return;
     selectedCharacterId = c.id;
+    showingBooking = false;
     chat?.dispose();
     chat = null;
     notifyListeners();

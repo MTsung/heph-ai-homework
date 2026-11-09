@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/chat_controller.dart';
 
@@ -9,10 +10,13 @@ import '../state/chat_controller.dart';
 const kMaxMessageChars = 500;
 
 class ChatView extends StatefulWidget {
-  const ChatView({super.key, required this.character, required this.controller});
+  const ChatView({super.key, required this.character, required this.controller, this.onBookingIntent});
 
   final Character character;
   final ChatController controller;
+
+  /// 在一般聊天 SSE 前先判斷是否切到訂位流程;回傳 true 表示已接手這句話。
+  final Future<bool> Function(String text)? onBookingIntent;
 
   @override
   State<ChatView> createState() => _ChatViewState();
@@ -59,6 +63,13 @@ class _ChatViewState extends State<ChatView> with WidgetsBindingObserver {
     if (text.trim().isEmpty || c.busy) return;
     _input.clear();
     _focus.requestFocus();
+    try {
+      if (await widget.onBookingIntent?.call(text) == true) return;
+    } on ApiException catch (e) {
+      c.showExternalError(e.message);
+      _input.text = text;
+      return;
+    }
     await c.send(text);
     // 點數不足等「根本沒送出」的情況,把文字還給輸入框
     if (c.sendError != null && _input.text.isEmpty) {
@@ -343,11 +354,12 @@ class _Composer extends StatelessWidget {
                 maxLines: 5,
                 maxLength: kMaxMessageChars,
                 // 只在接近上限(80%)時才顯示字數,平常不打擾;到上限時輸入框就不再接受字元
-                buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
-                    currentLength >= kMaxMessageChars * 0.8
-                        ? Text('$currentLength / $maxLength',
-                            style: TextStyle(fontSize: 12, color: currentLength >= kMaxMessageChars ? Colors.red : Colors.grey))
-                        : null,
+                buildCounter: (_, {required currentLength, required isFocused, maxLength}) => currentLength >= kMaxMessageChars * 0.8
+                    ? Text(
+                        '$currentLength / $maxLength',
+                        style: TextStyle(fontSize: 12, color: currentLength >= kMaxMessageChars ? Colors.red : Colors.grey),
+                      )
+                    : null,
                 decoration: InputDecoration(
                   hintText: busy ? 'AI 回覆中…' : '輸入訊息(Enter 送出 · Shift+Enter 換行)',
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

@@ -229,7 +229,7 @@ CREATE INDEX ledger_user_idx ON ledger (user_id, id DESC);
     ),
     l AS (
       INSERT INTO ledger (user_id, type, amount, balance_after, ref_type, ref_id, idem_key, note, meta)
-      SELECT h.user_id, 'charge', -h.amount, a.balance, 'message', $1, 'charge:' || $1, $2, $3::jsonb
+      SELECT h.user_id, 'charge', -h.amount, a.balance, coalesce($4::text, 'message'), $1, 'charge:' || $1, $2, $3::jsonb
         FROM h JOIN a ON a.user_id = h.user_id WHERE h.amount > 0
       ON CONFLICT (idem_key) DO NOTHING RETURNING id
     )
@@ -237,10 +237,13 @@ CREATE INDEX ledger_user_idx ON ledger (user_id, id DESC);
 
   async function settle(b: z.infer<typeof resolveSchema>) {
     const note = (b.meta?.note as string | undefined) ?? 'AI 回覆';
+    // 帳本的 ref_type 讓呼叫端標示扣點來源(chat 不帶 → 'message';booking 帶 'booking_turn' / 'booking')
+    const refType = typeof b.meta?.ref_type === 'string' ? b.meta.ref_type.slice(0, 32) : null;
     const r = await pool.query<{ user_id: string | null; balance: string | null }>(SETTLE_SQL, [
       b.ref,
       note,
       JSON.stringify(b.meta ?? {}),
+      refType,
     ]);
     const row = r.rows[0]!;
     if (row.user_id) {

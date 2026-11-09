@@ -14,6 +14,7 @@
 - [後台 API](#後台-api-admin)
 - [錯誤碼總表](#錯誤碼總表)
 - [Postman](#postman)
+- **訂位代辦(AI 代辦)** 另見 [`BOOKING-API.md`](BOOKING-API.md)
 
 ---
 

@@ -49,6 +49,8 @@ export const urls = {
   character: () => env('CHARACTER_URL', 'http://localhost:3002'),
   chat: () => env('CHAT_URL', 'http://localhost:3003'),
   billing: () => env('BILLING_URL', 'http://localhost:3004'),
+  booking: () => env('BOOKING_URL', 'http://localhost:3005'),
+  browserAgent: () => env('BROWSER_AGENT_URL', 'http://localhost:3010'),
 };
 
 /** Redis 事件 / 頻道 / key 的共用名稱,集中管理避免各服務拼錯。 */

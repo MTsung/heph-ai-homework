@@ -206,3 +206,17 @@ class _SpyController extends ChatController {
   @override
   Future<void> send(String text, {String? clientMsgId}) async => onSendCalled();
 }
+
+/// 記錄 send() 被呼叫次數的 ChatController(不真的打網路)
+class _SpyController extends ChatController {
+  _SpyController(ChatController base, this.onSendCalled)
+      : super(api: base.api, conversationId: base.conversationId, onBalance: (_) {}, onPreview: (_) {}) {
+    messages.addAll(base.messages);
+    loading = false;
+  }
+
+  final void Function() onSendCalled;
+
+  @override
+  Future<void> send(String text, {String? clientMsgId}) async => onSendCalled();
+}
