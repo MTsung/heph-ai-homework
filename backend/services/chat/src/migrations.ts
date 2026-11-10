@@ -3,6 +3,7 @@ import type { Migration } from '../../../shared/db';
 export const migrations: Migration[] = [
   {
     id: '001_init',
+    // 沒有 down:建立全部資料表的初始結構不提供倒退,避免一個指令清光所有對話。開發環境要重來請用 `docker compose down -v`。
     sql: `
 -- 一位使用者與一個角色只有一條對話(陪伴型產品:同一個角色的聊天紀錄是連續的)
 CREATE TABLE conversations (
@@ -58,6 +59,15 @@ CREATE TABLE pending_releases (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 `,
+    // 倒退會丟掉「還沒補償成功的退款紀錄」:有殘留時拒絕,避免使用者被扣的點數永遠沒退
+    down: `
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pending_releases) THEN
+    RAISE EXCEPTION 'pending_releases 還有未處理的紀錄,先等 reaper 處理完再倒退';
+  END IF;
+END $$;
+DROP TABLE pending_releases;
+`,
   },
   {
     id: '003_llm_usage',
@@ -69,6 +79,13 @@ ALTER TABLE messages
   ADD COLUMN provider text,
   ADD COLUMN input_tokens int,
   ADD COLUMN output_tokens int;
+`,
+    // 倒退會丟掉已記錄的供應商與 token 用量(成本對帳資料),不影響功能
+    down: `
+ALTER TABLE messages
+  DROP COLUMN provider,
+  DROP COLUMN input_tokens,
+  DROP COLUMN output_tokens;
 `,
   },
 ];

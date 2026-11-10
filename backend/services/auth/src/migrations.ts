@@ -4,6 +4,7 @@ import { OUTBOX_DDL } from '../../../shared/events';
 export const migrations: Migration[] = [
   {
     id: '001_init',
+    // 沒有 down:初始結構不提供倒退(會清光資料表)。開發環境要重來請用 `docker compose down -v`。
     sql: `
 CREATE TABLE users (
   id uuid PRIMARY KEY,

@@ -1,0 +1,71 @@
+# 多 replica 部署:疊在 docker-compose.yml 上面,不改變原本單機開發的行為。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d
+#   (或用 scripts/release.sh,它在 COMPOSE_FILE 含這個檔案時會做滾動更新)
+#
+# 與單機版的差異:
+#   1. 前面多一個 nginx(edge)接外部流量,gateway 不再對外開埠 —— 否則第二個 gateway 會因埠被佔用而啟動失敗。
+#   2. 各服務預設 2 個 replica,數量用環境變數調整(例如 CHAT_REPLICAS=6)。
+#   3. PostgreSQL / Redis 不對主機開埠(要看資料請用 `docker compose exec`)。
+#
+# 沒有放進來的:
+#   - admin 仍然是單一個、只綁 127.0.0.1:它沒有權限控管,不該多開、也不該對外。
+#   - browser-agent 的 replica 數不在這裡設定,因為「同時最多 N 筆訂位」(MAX_CONCURRENT_BOOKINGS)才是容量上限,
+#     見 docs/OPERATIONS.md。
+#   - PostgreSQL / Redis 本身仍是單一實例。流量再大時換成託管服務,並加 PgBouncer。
+#
+# 改了 replica 數之後,先用 `scripts/release.sh budget` 檢查 PostgreSQL 連線數預算。
+
+services:
+  edge:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    volumes:
+      - ./backend/docker/nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${EDGE_PORT:-8080}:8080"
+    depends_on:
+      gateway: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/edge-healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    ports: !reset []
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-2}
+
+  auth:
+    deploy:
+      replicas: ${AUTH_REPLICAS:-2}
+  character:
+    deploy:
+      replicas: ${CHARACTER_REPLICAS:-2}
+  billing:
+    deploy:
+      replicas: ${BILLING_REPLICAS:-2}
+  chat:
+    deploy:
+      replicas: ${CHAT_REPLICAS:-2}
+  booking:
+    deploy:
+      replicas: ${BOOKING_REPLICAS:-2}
+
+  postgres:
+    ports: !reset []
+    # 多 replica 的連線池加總要小於 max_connections(`scripts/release.sh budget` 會算)。
+    # 這只是權宜:再往上要加 PgBouncer,而不是一直調高這個數字(每個連線都有記憶體成本)。
+    command: ["postgres", "-c", "max_connections=${PG_MAX_CONNECTIONS:-500}", "-c", "shared_buffers=256MB"]
+  redis-state:
+    ports: !reset []
+  redis-cache:
+    ports: !reset []
+
+  # 冒煙測試從 edge 進去,才會經過和真實流量一樣的路徑(分流到多個 gateway)
+  tools:
+    environment:
+      GATEWAY_URL: http://edge:8080
+    depends_on:
+      edge: { condition: service_healthy }

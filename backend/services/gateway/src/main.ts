@@ -4,8 +4,8 @@ import { envInt, internalToken, urls } from '../../../shared/config';
 import { AppError, Errors } from '../../../shared/errors';
 import { createRedis, rateLimit } from '../../../shared/redis';
 import { SseStream } from '../../../shared/sse';
+import { Upstream } from '../../../shared/upstream';
 import { SessionGuard } from './session';
-import { Upstream } from './upstream';
 
 type Target = 'auth' | 'character' | 'chat' | 'billing' | 'booking';
 
@@ -66,7 +66,6 @@ async function main(): Promise<void> {
     billing: new Upstream('billing', urls.billing(), log),
     booking: new Upstream('booking', urls.booking(), log),
   };
-  Object.values(upstreams).forEach((u) => u.start());
 
   const guard = new SessionGuard(redis, new ServiceClient('auth', urls.auth(), 2000), log);
 
@@ -77,6 +76,9 @@ async function main(): Promise<void> {
     // 訂位的寫入操作(建立 / 回覆 / 確認…)每次都可能呼叫模型或搜尋,另外限流
     bookingPerMin: envInt('RL_BOOKING_PER_USER_PER_MIN', 30),
   };
+
+  // 進行中的轉發數(含 SSE 串流)。關閉時要等它歸零,串流才不會被硬切
+  let inflight = 0;
 
   async function enforce(key: string, limit: number): Promise<void> {
     const r = await rateLimit(redis, key, limit, 60_000);
@@ -101,13 +103,22 @@ async function main(): Promise<void> {
     const hasBody = !['GET', 'HEAD'].includes(c.req.method);
     const body = hasBody ? await c.req.arrayBuffer() : undefined;
 
+    inflight++;
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        inflight--;
+      }
+    };
+
     const ac = new AbortController();
     // 只限制「等上游回應標頭」的時間;標頭回來後(包含 SSE 長連線)不再設總時限
     const headerTimer = setTimeout(() => ac.abort(new Error('upstream header timeout')), 10_000);
     let upstream: Response;
-    const target = up.base();
     try {
-      upstream = await fetch(`${target}${path}${search}`, {
+      // 對該服務的多個 replica 輪流分配;連線失敗或對方正在關閉時換另一個 replica(見 shared/upstream.ts)
+      upstream = await up.fetch(`${path}${search}`, {
         method: c.req.method,
         headers,
         body,
@@ -115,7 +126,8 @@ async function main(): Promise<void> {
         redirect: 'manual',
       });
     } catch (e) {
-      log.warn({ target: route.target, addr: target, err: (e as Error).message }, 'upstream request failed');
+      release();
+      log.warn({ target: route.target, err: (e as Error).message }, 'upstream request failed');
       throw new AppError(502, 'BAD_GATEWAY', '服務暫時無法使用,請稍後再試');
     } finally {
       clearTimeout(headerTimer);
@@ -126,6 +138,7 @@ async function main(): Promise<void> {
 
     const isSse = (upstream.headers.get('content-type') ?? '').startsWith('text/event-stream');
     if (!isSse || !upstream.body) {
+      release();
       return new Response(upstream.body, { status: upstream.status, headers: out });
     }
 
@@ -139,10 +152,12 @@ async function main(): Promise<void> {
           const { value, done } = await reader.read();
           if (done) {
             untrack();
+            release();
             ctrl.close();
           } else ctrl.enqueue(value);
         } catch {
           untrack();
+          release();
           try {
             ctrl.close();
           } catch {
@@ -153,6 +168,7 @@ async function main(): Promise<void> {
       cancel() {
         // 用戶端斷線:取消上游讀取。chat-service 只會移除這個訂閱者,回覆照常生成完。
         untrack();
+        release();
         ac.abort(new Error('client disconnected'));
         reader.cancel().catch(() => undefined);
       },
@@ -189,12 +205,23 @@ async function main(): Promise<void> {
   });
 
   // 運維用(需要 internal token):目前 session L1 快取大小、被監看/代理中的連線數、chat replica 數
-  app.get('/internal/stats', (c) => c.json({ ...guard.stats, chat_replicas: upstreams.chat.replicas }));
+  app.get('/internal/stats', (c) =>
+    c.json({
+      ...guard.stats,
+      inflight,
+      chat_replicas: upstreams.chat.replicas,
+      replicas: Object.fromEntries(Object.entries(upstreams).map(([k, u]) => [k, u.replicas])),
+    }),
+  );
 
   const server = listen(envInt('PORT', 8080), 262_144);
   log.info({ port: server.port }, 'gateway listening');
   onShutdown(log, async () => {
+    // 不再接新連線;進行中的請求與 SSE 串流繼續跑,等它們收尾(chat 自己會在 20 秒內結束生成)
     await server.stop();
+    const deadline = Date.now() + envInt('GATEWAY_DRAIN_MS', 22_000);
+    while (inflight > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+    log.info({ inflight }, 'gateway drained');
     redis.disconnect();
   });
 }

@@ -5,6 +5,7 @@ import { createPool, migrate, waitForDb } from '../../../shared/db';
 import { Errors, parse } from '../../../shared/errors';
 import { CacheAside, CacheStats, createRedis } from '../../../shared/redis';
 import { characterSeeds } from './seed';
+import { migrations } from './migrations';
 
 const CACHE_TTL_SEC = envInt('CHARACTER_CACHE_TTL_SEC', 600);
 
@@ -69,27 +70,7 @@ async function main(): Promise<void> {
   const cache = new CacheAside(cacheRedis, 'char', stats, log);
 
   await waitForDb(pool);
-  await migrate(pool, 'character', [
-    {
-      id: '001_init',
-      sql: `
-CREATE TABLE characters (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug text NOT NULL UNIQUE,
-  name text NOT NULL,
-  tagline text NOT NULL DEFAULT '',
-  avatar text NOT NULL DEFAULT '🙂',
-  persona text NOT NULL,
-  greeting text NOT NULL,
-  price int NOT NULL DEFAULT 2 CHECK (price >= 0),
-  model text,
-  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')),
-  sort_order int NOT NULL DEFAULT 100,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);`,
-    },
-  ]);
+  await migrate(pool, 'character', migrations);
   for (const s of characterSeeds) {
     await pool.query(
       `INSERT INTO characters (slug, name, tagline, avatar, persona, greeting, price, sort_order)

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors';
 import { internalToken } from './config';
+import { Upstream } from './upstream';
 
 export interface RequestOpts {
   body?: unknown;
@@ -15,16 +16,22 @@ export interface RequestOpts {
  * 服務間 HTTP 呼叫(Bun 原生 fetch,自帶 keep-alive 連線池)+ 逾時 + 簡易斷路器。
  * 斷路器:連續 5 次「網路錯誤/逾時/5xx」後開路 3 秒,期間直接快速失敗(503),
  * 避免下游掛掉時,上游請求全部卡在逾時、拖垮自己的連線與 event loop。
+ *
+ * 目標服務有多個 replica 時,請求會輪流分給每一個,並在連線失敗時換另一個重試(見 upstream.ts)。
+ * 斷路器是對「整個服務名稱」計算的:只有一個 replica 壞掉時,重試會吸收掉失敗,不會累積到開路。
  */
 export class ServiceClient {
   private failures = 0;
   private openUntil = 0;
+  private readonly upstream: Upstream;
 
   constructor(
     readonly name: string,
-    private readonly baseUrl: string,
+    baseUrl: string,
     private readonly defaultTimeoutMs = 5000,
-  ) {}
+  ) {
+    this.upstream = new Upstream(name, baseUrl);
+  }
 
   async request<T = unknown>(method: string, path: string, opts: RequestOpts = {}): Promise<T> {
     if (Date.now() < this.openUntil) {
@@ -46,7 +53,7 @@ export class ServiceClient {
 
     let res: Response;
     try {
-      res = await fetch(`${this.baseUrl}${path}${qs ? `?${qs}` : ''}`, {
+      res = await this.upstream.fetch(`${path}${qs ? `?${qs}` : ''}`, {
         method,
         headers,
         body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,

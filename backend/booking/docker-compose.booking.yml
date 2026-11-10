@@ -4,7 +4,7 @@
 # 設計見 docs/booking/DECISIONS.md
 
 x-bun: &bun
-  image: chat-app/backend:local
+  image: chat-app/backend:${IMAGE_TAG:-local}
   build:
     context: ..
     dockerfile: Dockerfile
@@ -81,6 +81,7 @@ services:
   # browser-use agent(Python):只處理 booking 已確認、已有 URL 的方案。
   # 目前 allowlist 只有 BROWSER_BOOKING_URL(享樂地圖 JoyMap 測試店家)。
   browser-agent:
+    image: chat-app/browser-agent:${IMAGE_TAG:-local}
     build:
       context: ./services/browser-agent
       dockerfile: Dockerfile

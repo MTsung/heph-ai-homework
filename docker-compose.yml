@@ -8,8 +8,10 @@ include:
     env_file: .env
 
 # 所有 Bun 服務共用的設定
+# IMAGE_TAG 由 scripts/release.sh 設定(git commit),讓每個版本的 image 都被保留、rollback 不必重新 build。
+# 沒設定時是 `local`(本機開發)。
 x-bun: &bun
-  image: chat-app/backend:local
+  image: chat-app/backend:${IMAGE_TAG:-local}
   build:
     context: ./backend
     dockerfile: Dockerfile
@@ -99,6 +101,7 @@ services:
       SERVICE: auth
       PORT: "3001"
       DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/auth
+      PG_POOL_MAX: ${AUTH_PG_POOL_MAX:-10}
     depends_on: *infra-ready
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
@@ -113,6 +116,7 @@ services:
       SERVICE: character
       PORT: "3002"
       DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/character
+      PG_POOL_MAX: ${CHARACTER_PG_POOL_MAX:-10}
     depends_on: *infra-ready
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/healthz"]
@@ -128,8 +132,9 @@ services:
       PORT: "3004"
       DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/billing
       SIGNUP_BONUS: ${SIGNUP_BONUS:-200}
-      # 連線池大小要和 Postgres max_connections(300)一起算:
-      # billing 40 + chat 40×最多 3 replica + auth 10 + character 10 ≈ 180 < 300
+      # 連線池大小要和 Postgres max_connections 一起算:Σ(replica 數 × PG_POOL_MAX) 必須小於 max_connections。
+      # 預設各服務 1 個 replica:auth 10 + character 10 + billing 40 + chat 40 + booking 20 = 120 < 300。
+      # 多開 replica 後用 `scripts/release.sh budget` 檢查(部署時也會自動檢查)。
       PG_POOL_MAX: ${BILLING_PG_POOL_MAX:-40}
     depends_on: *infra-ready
     healthcheck:
@@ -188,7 +193,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
+    command: ["postgres", "-c", "max_connections=${PG_MAX_CONNECTIONS:-300}", "-c", "shared_buffers=256MB"]
     environment:
       POSTGRES_USER: chatapp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatapp}
@@ -258,6 +263,7 @@ services:
       <<: *bun-env
       GATEWAY_URL: http://gateway:8080
       BOOKING_DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/booking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatapp} # scripts/migrate.ts 連各服務的資料庫用
     depends_on:
       gateway: { condition: service_healthy }
     entrypoint: []

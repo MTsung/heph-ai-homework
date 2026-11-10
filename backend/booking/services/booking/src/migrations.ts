@@ -3,6 +3,7 @@ import type { Migration } from '../../../../shared/db';
 export const migrations: Migration[] = [
   {
     id: '001_init',
+    // 沒有 down:建立全部資料表的初始結構不提供倒退,避免一個指令清光所有訂位。開發環境要重來請用 `docker compose down -v`。
     sql: `
 -- 一筆訂位需求。整個對話的狀態都存在這裡(slots / pending / plan),所以使用者可以隨時離開再回來,
 -- 任何一台 instance 都能接手;記憶體裡不放任何必要的狀態。
@@ -97,6 +98,15 @@ CREATE INDEX charges_booking_idx ON charges (booking_id);
 -- 確認當下預扣訂位費用所用的 ref。每次「嘗試確認」都用全新的 ref(例如第一次因點數不足被拒、補點後再確認),
 -- 避免重用已經結束的 ref,讓結算更新不到任何一列。執行與結算都以這個欄位為準。
 ALTER TABLE bookings ADD COLUMN charge_ref text;
+`,
+    // charge_ref 是進行中訂位的扣點對應:還有沒結束的訂位時倒退,結算會找不到對應的扣點。所以有進行中的就拒絕。
+    down: `
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM bookings WHERE status IN ('confirmed','executing') AND charge_ref IS NOT NULL) THEN
+    RAISE EXCEPTION '還有進行中的訂位(confirmed / executing),等它們結束再倒退';
+  END IF;
+END $$;
+ALTER TABLE bookings DROP COLUMN charge_ref;
 `,
   },
 ];

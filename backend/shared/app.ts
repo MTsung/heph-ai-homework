@@ -89,6 +89,8 @@ export function buildApp(opts: AppOptions): BuiltApp {
 
   app.onError((err, c) => {
     if (err instanceof AppError) {
+      // 這個 replica 正在關閉、請求還沒被處理:標頭讓呼叫端(gateway / ServiceClient)直接換另一個 replica 重送
+      if (err.code === 'SERVER_DRAINING') c.header('x-draining', '1');
       if (err.status >= 500) log.error({ reqId: c.get('reqId'), err: err.message, code: err.code }, 'request failed');
       return c.json(err.toBody(), err.status as ContentfulStatusCode);
     }
@@ -103,6 +105,7 @@ export function buildApp(opts: AppOptions): BuiltApp {
 
   app.get('/healthz', (c) => c.json({ status: 'ok', service: opts.service }));
   app.get('/readyz', async (c) => {
+    if (shuttingDown) return c.json({ status: 'draining', service: opts.service }, 503);
     try {
       await opts.ready?.();
       return c.json({ status: 'ready', service: opts.service });
@@ -151,9 +154,11 @@ export function clientIp(c: Ctx): string {
   return c.env.server.requestIP(c.req.raw)?.address ?? 'unknown';
 }
 
+/** 收到 SIGTERM 之後為 true;/readyz 會回 503,讓負載平衡器 / 編排系統不再把新請求送過來 */
+let shuttingDown = false;
+
 /** 優雅關閉:收到 SIGTERM 時先執行清理(停止接新請求、等串流收尾),再結束。 */
 export function onShutdown(log: Logger, cleanup: () => Promise<void>, timeoutMs = 25_000): void {
-  let shuttingDown = false;
   const handler = (sig: string) => {
     if (shuttingDown) return;
     shuttingDown = true;

@@ -15,3 +15,5 @@ assignments/
 
 # 本機資料庫備份(含個資)
 .db-backup/
+# 部署狀態(release.sh):目前/上一版 tag、紀錄
+.deploy/

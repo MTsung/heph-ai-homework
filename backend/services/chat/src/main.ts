@@ -180,12 +180,14 @@ async function main(): Promise<void> {
   onShutdown(
     log,
     async () => {
-      // 滾動更新時:先宣告 draining(新請求收到 503,由上游改打別台),
+      // 滾動更新時:先宣告 draining,並「立刻停止接受新連線」(Bun 的 stop() 不會中斷進行中的請求與 SSE),
+      // 之後的新請求會得到 ECONNREFUSED,gateway 確定它們沒被處理、可以安全地換另一台重送。
+      // 如果等 drain 結束才 stop,drain 的 20 秒內仍會有新連線被接受、卻在關閉時被丟掉,gateway 只能等到逾時。
       // 再讓進行中的回覆自然結束,逾時才強制中止(中止的回覆會標記失敗並歸還點數)。
       draining = true;
       reaper.stop();
-      await manager.drain(envInt('DRAIN_WAIT_MS', 20_000));
       await server.stop();
+      await manager.drain(envInt('DRAIN_WAIT_MS', 20_000));
       await consumer.stop();
       charSub.disconnect();
       stats.stop();
