@@ -4,7 +4,7 @@ import { tx } from '../../../../shared/db';
 import { acquireLock, releaseLock } from '../../../../shared/redis';
 import { advance, applyPatch, toRef, type Step } from './dialog';
 import { newExecRef, newTurnRef, type Deps } from './deps';
-import { isBookingIntent, normalizePhone, pickCandidate } from './nlu';
+import { isBookingIntent, normalizePhone, pickCandidate, todayStr } from './nlu';
 import type { Runner } from './runner';
 import {
   ACTIVE_DRAFT,
@@ -66,6 +66,29 @@ interface ChargeView {
   amount: number;
   state: string;
   note: string;
+}
+
+// ============================================================================ 列表
+export const LIST_VIEWS = ['attention', 'upcoming', 'in_progress', 'history', 'active', 'all'] as const;
+export type ListView = (typeof LIST_VIEWS)[number];
+export const HISTORY_RESULTS = ['succeeded', 'failed', 'unknown', 'cancelled', 'expired'] as const;
+export interface ListOpts {
+  view: ListView;
+  limit: number;
+  /** 只用於 history */
+  result?: (typeof HISTORY_RESULTS)[number];
+  includeDrafts?: boolean;
+  before?: { at: string; id: string };
+}
+
+/** history 的 keyset 分頁游標:(結束時間, id)。不透明字串,用戶端原樣帶回 */
+export function encodeCursor(at: Date, id: string): string {
+  return Buffer.from(`${new Date(at).toISOString()}|${id}`).toString('base64url');
+}
+export function decodeCursor(s: string): { at: string; id: string } | null {
+  const [at, id] = Buffer.from(s, 'base64url').toString('utf8').split('|');
+  if (!at || !id || Number.isNaN(Date.parse(at)) || !/^[0-9a-f-]{36}$/.test(id)) return null;
+  return { at, id };
 }
 
 const isExpired = (r: Pick<BookingRow, 'status' | 'expires_at'>) =>
@@ -137,28 +160,85 @@ export class BookingService {
     return toView(this.d, row, { events: events.rows, charges: charges.rows });
   }
 
-  async list(userId: string, opts: { activeOnly: boolean; limit: number }) {
+  /**
+   * 訂位列表。依「使用者接下來要做什麼」分組(view):
+   *   attention    需要你處理:結果不明且用餐日還沒過(請向店家確認)、等你確認且未過期的方案
+   *   upcoming     即將到來:訂位成功且用餐日 >= 今天(台北),依用餐時間排序
+   *   in_progress  進行中:補資料中、已確認、正在訂位
+   *   history      訂位紀錄:所有已結束的(成功 / 失敗 / 結果不明 / 取消 / 過期),依結束時間新到舊、可分頁。
+   *                預設不含「沒確認過方案就取消 / 過期」的草稿(include_drafts=true 才列出)
+   *   active / all 舊的查法(相容):進行中含等待確認 / 全部
+   */
+  async list(userId: string, opts: ListOpts) {
+    const params: unknown[] = [userId];
+    const bind = (v: unknown) => `$${params.push(v)}`;
+    const live = `status IN ('collecting','awaiting_confirmation','confirmed','executing')`;
+    // 「等待確認但已過期」在背景任務落地前也算過期
+    const pendingFresh = `(status = 'awaiting_confirmation' AND (expires_at IS NULL OR expires_at > now()))`;
+    const pendingStale = `(status = 'awaiting_confirmation' AND expires_at <= now())`;
+    const finished = `(status IN ('succeeded','failed','unknown','cancelled','expired') OR ${pendingStale})`;
+    const planDate = `(confirmed_plan->>'date')`;
+    const today = () => bind(todayStr(new Date())); // 用餐日以台北日期比較(與 NLU 解析日期的基準相同)
+    const where: Record<ListView, () => string> = {
+      attention: () => `((status = 'unknown' AND ${planDate} >= ${today()}) OR ${pendingFresh})`,
+      upcoming: () => `(status = 'succeeded' AND ${planDate} >= ${today()})`,
+      in_progress: () => `status IN ('collecting','confirmed','executing')`,
+      history: () => finished,
+      active: () => live,
+      all: () => 'true',
+    };
+    const order: Record<ListView, string> = {
+      attention: `CASE WHEN status = 'unknown' THEN 0 ELSE 1 END, updated_at DESC, id DESC`,
+      upcoming: `${planDate}, (confirmed_plan->>'time'), id`,
+      in_progress: 'updated_at DESC, id DESC',
+      history: 'coalesce(finished_at, updated_at) DESC, id DESC',
+      active: 'updated_at DESC, id DESC',
+      all: 'updated_at DESC, id DESC',
+    };
+    const filters: string[] = [`user_id = $1`, where[opts.view]()];
+    if (opts.view === 'history') {
+      if (!opts.includeDrafts) filters.push('confirmed_plan IS NOT NULL');
+      if (opts.result === 'expired') filters.push(`(status = 'expired' OR ${pendingStale})`);
+      else if (opts.result) filters.push(`status = ${bind(opts.result)}`);
+      if (opts.before) {
+        filters.push(`(coalesce(finished_at, updated_at), id) < (${bind(opts.before.at)}::timestamptz, ${bind(opts.before.id)}::uuid)`);
+      }
+    }
+    const limit = bind(opts.limit + 1);
     const { rows } = await this.d.pool.query<BookingRow>(
-      `SELECT * FROM bookings WHERE user_id = $1
-          AND ($2::boolean = false OR status IN ('collecting','awaiting_confirmation','confirmed','executing'))
-        ORDER BY updated_at DESC LIMIT $3`,
-      [userId, opts.activeOnly, opts.limit],
+      `SELECT * FROM bookings WHERE ${filters.join(' AND ')} ORDER BY ${order[opts.view]} LIMIT ${limit}`,
+      params,
     );
-    const items = rows.map((r) => {
+    const hasMore = rows.length > opts.limit;
+    const page = hasMore ? rows.slice(0, opts.limit) : rows;
+    const items = page.map((r) => {
       const v = toView(this.d, r);
+      const plan = r.confirmed_plan ?? r.plan;
       return {
         id: v.id,
         status: v.status,
         summary: v.summary,
         pending_kind: v.pending?.kind ?? null,
         expires_at: v.status === 'awaiting_confirmation' ? r.expires_at : null,
+        // 列表直接顯示「哪家、哪天幾點、幾位」,不必逐筆再查詳情
+        restaurant: plan ? { name: plan.restaurant.name, phone: plan.restaurant.phone ?? null, address: plan.restaurant.address } : null,
+        date: plan?.date ?? r.slots.date ?? null,
+        time: plan?.time ?? r.slots.time ?? null,
+        party_size: plan?.party_size ?? r.slots.party_size ?? null,
         result: v.result,
         updated_at: v.updated_at,
+        finished_at: v.finished_at,
       };
     });
-    // 進行中的在前面(使用者「回來看」時最想看到的)
-    const rank = (s: string) => (['collecting', 'awaiting_confirmation', 'confirmed', 'executing'].includes(s) ? 0 : 1);
-    return { items: items.sort((a, b) => rank(a.status) - rank(b.status)) };
+    const last = page[page.length - 1];
+    const nextBefore =
+      opts.view === 'history' && hasMore && last ? encodeCursor(last.finished_at ?? last.updated_at, last.id) : null;
+    if (opts.view === 'active' || opts.view === 'all') {
+      // 舊的查法:進行中的在前面(使用者「回來看」時最想看到的)
+      const rank = (s: string) => (['collecting', 'awaiting_confirmation', 'confirmed', 'executing'].includes(s) ? 0 : 1);
+      items.sort((a, b) => rank(a.status) - rank(b.status));
+    }
+    return { items, next_before: nextBefore };
   }
 
   // ------------------------------------------------------------------------ 建立

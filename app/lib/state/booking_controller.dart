@@ -22,6 +22,9 @@ class BookingController extends ChangeNotifier {
   final VoidCallback onChanged;
 
   bool busy = false;
+
+  /// 使用者觸發的操作正在等後端回應(輪詢重新整理不算),畫面用來顯示「處理中」氣泡
+  bool waiting = false;
   String? error;
   Timer? _poll;
   bool _disposed = false;
@@ -29,8 +32,9 @@ class BookingController extends ChangeNotifier {
   bool get running => booking.status == BookingStatus.confirmed || booking.status == BookingStatus.executing;
   bool get canCancel => booking.status == BookingStatus.collecting || booking.status == BookingStatus.awaitingConfirmation;
 
+  /// 重新讀取(也是執行中每 2 秒的輪詢)。狀態沒變就不通知側邊欄重讀分組,避免輪詢時多打列表 API。
   Future<void> refresh() async {
-    await _perform(() async => _replace(await _api.get(booking.id)), refreshPoints: false);
+    await _perform(() async => _replace(await _api.get(booking.id)), refreshPoints: false, quiet: true);
   }
 
   Future<void> message(String text) async {
@@ -78,15 +82,19 @@ class BookingController extends ChangeNotifier {
     await _perform(() async => _replace(await _api.cancel(booking.id)), refreshPoints: false);
   }
 
-  Future<void> _perform(Future<void> Function() action, {bool refreshPoints = true}) async {
+  Future<void> _perform(Future<void> Function() action, {bool refreshPoints = true, bool quiet = false}) async {
     if (busy) return;
     busy = true;
+    waiting = !quiet;
     error = null;
     notifyListeners();
+    final before = booking.status;
     try {
       await action();
-      if (refreshPoints) await onBalance();
-      onChanged();
+      final changed = booking.status != before;
+      // 輪詢時從「執行中」變成結果(成功會扣點)也要更新點數
+      if (refreshPoints || (quiet && changed)) await onBalance();
+      if (!quiet || changed) onChanged();
     } on ApiException catch (e) {
       error = switch (e.code) {
         'INSUFFICIENT_POINTS' => '點數不足，無法處理這筆訂位。',
@@ -98,6 +106,7 @@ class BookingController extends ChangeNotifier {
       };
     } finally {
       busy = false;
+      waiting = false;
       if (!_disposed) notifyListeners();
     }
   }

@@ -8,9 +8,17 @@ class BookingApi {
   Future<bool> detect(String text) async => (await _client.post('/bookings/detect', {'text': text}))['is_booking'] == true;
   Future<BookingView> create(String text, String clientRequestId) async =>
       BookingView.fromJson(await _client.post('/bookings', {'text': text, 'client_request_id': clientRequestId}));
-  Future<List<BookingSummary>> active() async {
-    final json = await _client.get('/bookings', query: {'status': 'active', 'limit': 30});
-    return (json['items'] as List).map((x) => BookingSummary.fromJson((x as Map).cast<String, dynamic>())).toList();
+
+  /// 依分組列出訂位。history 可依結果篩選(succeeded / failed / unknown / cancelled / expired)並以 [before] 翻頁。
+  Future<BookingPage> list(BookingListView view, {int limit = 30, String? result, bool includeDrafts = false, String? before}) async {
+    final json = await _client.get(
+      '/bookings',
+      query: {'view': view.query, 'limit': limit, 'result': ?result, if (includeDrafts) 'include_drafts': 'true', 'before': ?before},
+    );
+    return BookingPage(
+      items: (json['items'] as List).map((x) => BookingSummary.fromJson((x as Map).cast<String, dynamic>())).toList(),
+      nextBefore: json['next_before'] as String?,
+    );
   }
 
   Future<BookingView> get(String id) async => BookingView.fromJson(await _client.get('/bookings/$id'));

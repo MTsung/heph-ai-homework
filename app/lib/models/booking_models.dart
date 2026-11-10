@@ -102,7 +102,11 @@ class BookingPending {
   factory BookingPending.fromJson(Map<String, dynamic> j) => BookingPending(
     kind: j['kind'] as String,
     restaurants: (j['options'] as List? ?? const []).whereType<Map>().map((x) => BookingRestaurant.fromJson(x.cast<String, dynamic>())).toList(),
-    fields: (j['fields'] as List? ?? const []).whereType<Map>().map((x) => BookingInfoField.fromJson(x.cast<String, dynamic>())).toList(),
+    fields: (j['fields'] as List? ?? const []).map((x) {
+      // provide_slots 的 fields 是字串(date / time / party_size),provide_info 則是物件
+      if (x is String) return BookingInfoField(key: x, label: x, type: 'text');
+      return BookingInfoField.fromJson((x as Map).cast<String, dynamic>());
+    }).toList(),
     times: (j['options'] as List? ?? const []).whereType<String>().toList(),
   );
 
@@ -176,21 +180,85 @@ class BookingEvent {
 }
 
 class BookingSummary {
-  BookingSummary({required this.id, required this.status, required this.summary, required this.updatedAt, this.expiresAt, this.result});
-  factory BookingSummary.fromJson(Map<String, dynamic> j) => BookingSummary(
-    id: j['id'] as String,
-    status: bookingStatusFrom(j['status'] as String),
-    summary: (j['summary'] ?? '') as String,
-    updatedAt: DateTime.parse(j['updated_at'] as String).toLocal(),
-    expiresAt: j['expires_at'] == null ? null : DateTime.tryParse(j['expires_at'] as String)?.toLocal(),
-    result: j['result'] is Map ? BookingResult.fromJson((j['result'] as Map).cast<String, dynamic>()) : null,
-  );
+  BookingSummary({
+    required this.id,
+    required this.status,
+    required this.summary,
+    required this.updatedAt,
+    this.expiresAt,
+    this.result,
+    this.restaurantName,
+    this.restaurantPhone,
+    this.restaurantAddress,
+    this.date,
+    this.time,
+    this.partySize,
+  });
+  factory BookingSummary.fromJson(Map<String, dynamic> j) {
+    final restaurant = (j['restaurant'] as Map?)?.cast<String, dynamic>();
+    return BookingSummary(
+      id: j['id'] as String,
+      status: bookingStatusFrom(j['status'] as String),
+      summary: (j['summary'] ?? '') as String,
+      updatedAt: DateTime.parse(j['updated_at'] as String).toLocal(),
+      expiresAt: j['expires_at'] == null ? null : DateTime.tryParse(j['expires_at'] as String)?.toLocal(),
+      result: j['result'] is Map ? BookingResult.fromJson((j['result'] as Map).cast<String, dynamic>()) : null,
+      restaurantName: restaurant?['name'] as String?,
+      restaurantPhone: restaurant?['phone'] as String?,
+      restaurantAddress: restaurant?['address'] as String?,
+      date: j['date'] as String?,
+      time: j['time'] as String?,
+      partySize: j['party_size'] as int?,
+    );
+  }
   final String id;
   final BookingStatus status;
   final String summary;
   final DateTime updatedAt;
   final DateTime? expiresAt;
   final BookingResult? result;
+  final String? restaurantName;
+  final String? restaurantPhone;
+  final String? restaurantAddress;
+
+  /// YYYY-MM-DD(已確認的方案優先,其次是目前的方案 / 條件)
+  final String? date;
+
+  /// HH:MM
+  final String? time;
+  final int? partySize;
+
+  /// 「11/27(五) 10:30 · 2 位」;資料不齊時省略缺的部分
+  String get whenText => [if (date != null) formatBookingDate(date!), ?time, if (partySize != null) '$partySize 位'].join(' · ');
+}
+
+/// 列表分組(對應後端 GET /bookings?view=)
+enum BookingListView { attention, upcoming, inProgress, history }
+
+extension BookingListViewQuery on BookingListView {
+  String get query => switch (this) {
+    BookingListView.attention => 'attention',
+    BookingListView.upcoming => 'upcoming',
+    BookingListView.inProgress => 'in_progress',
+    BookingListView.history => 'history',
+  };
+}
+
+class BookingPage {
+  BookingPage({required this.items, this.nextBefore});
+  final List<BookingSummary> items;
+
+  /// 下一頁的游標(只有 history 有);null = 沒有更多
+  final String? nextBefore;
+}
+
+const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+
+/// YYYY-MM-DD → 11/27(五)。用餐日期是店家所在地(台灣)的日期,不做時區換算
+String formatBookingDate(String ymd) {
+  final d = DateTime.tryParse(ymd);
+  if (d == null) return ymd;
+  return '${d.month}/${d.day}(${_weekdays[d.weekday - 1]})';
 }
 
 class BookingView extends BookingSummary {
@@ -201,25 +269,42 @@ class BookingView extends BookingSummary {
     required super.updatedAt,
     super.expiresAt,
     super.result,
+    super.restaurantName,
+    super.restaurantPhone,
+    super.restaurantAddress,
+    super.date,
+    super.time,
+    super.partySize,
     this.pending,
     this.plan,
     this.confirmedPlan,
     this.events = const [],
   });
-  factory BookingView.fromJson(Map<String, dynamic> j) => BookingView(
-    id: j['id'] as String,
-    status: bookingStatusFrom(j['status'] as String),
-    summary: (j['summary'] ?? '') as String,
-    updatedAt: DateTime.parse(j['updated_at'] as String).toLocal(),
-    expiresAt: j['plan'] is Map && (j['plan'] as Map)['expires_at'] != null
-        ? DateTime.tryParse((j['plan'] as Map)['expires_at'] as String)?.toLocal()
-        : null,
-    pending: j['pending'] is Map ? BookingPending.fromJson((j['pending'] as Map).cast<String, dynamic>()) : null,
-    plan: j['plan'] is Map ? BookingPlan.fromJson((j['plan'] as Map).cast<String, dynamic>()) : null,
-    confirmedPlan: j['confirmed_plan'] is Map ? BookingPlan.fromJson((j['confirmed_plan'] as Map).cast<String, dynamic>()) : null,
-    result: j['result'] is Map ? BookingResult.fromJson((j['result'] as Map).cast<String, dynamic>()) : null,
-    events: (j['events'] as List? ?? const []).whereType<Map>().map((x) => BookingEvent.fromJson(x.cast<String, dynamic>())).toList(),
-  );
+  factory BookingView.fromJson(Map<String, dynamic> j) {
+    final plan = j['plan'] is Map ? BookingPlan.fromJson((j['plan'] as Map).cast<String, dynamic>()) : null;
+    final confirmed = j['confirmed_plan'] is Map ? BookingPlan.fromJson((j['confirmed_plan'] as Map).cast<String, dynamic>()) : null;
+    final shown = confirmed ?? plan;
+    return BookingView(
+      id: j['id'] as String,
+      status: bookingStatusFrom(j['status'] as String),
+      summary: (j['summary'] ?? '') as String,
+      updatedAt: DateTime.parse(j['updated_at'] as String).toLocal(),
+      expiresAt: j['plan'] is Map && (j['plan'] as Map)['expires_at'] != null
+          ? DateTime.tryParse((j['plan'] as Map)['expires_at'] as String)?.toLocal()
+          : null,
+      restaurantName: shown?.restaurant.name,
+      restaurantPhone: shown?.restaurant.phone,
+      restaurantAddress: shown?.restaurant.address,
+      date: shown?.date,
+      time: shown?.time,
+      partySize: shown?.partySize,
+      pending: j['pending'] is Map ? BookingPending.fromJson((j['pending'] as Map).cast<String, dynamic>()) : null,
+      plan: plan,
+      confirmedPlan: confirmed,
+      result: j['result'] is Map ? BookingResult.fromJson((j['result'] as Map).cast<String, dynamic>()) : null,
+      events: (j['events'] as List? ?? const []).whereType<Map>().map((x) => BookingEvent.fromJson(x.cast<String, dynamic>())).toList(),
+    );
+  }
   final BookingPending? pending;
   final BookingPlan? plan;
   final BookingPlan? confirmedPlan;

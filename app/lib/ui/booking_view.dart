@@ -38,6 +38,14 @@ class _BookingViewState extends State<BookingFlowView> with WidgetsBindingObserv
     if (state == AppLifecycleState.resumed) c.refresh();
   }
 
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
+    });
+  }
+
   Future<void> _send() async {
     final text = _text.text.trim();
     if (text.isEmpty || c.busy) return;
@@ -52,6 +60,7 @@ class _BookingViewState extends State<BookingFlowView> with WidgetsBindingObserv
       listenable: c,
       builder: (context, _) {
         final b = c.booking;
+        if (c.waiting) _scrollToEnd();
         return Column(
           children: [
             Container(
@@ -85,7 +94,7 @@ class _BookingViewState extends State<BookingFlowView> with WidgetsBindingObserv
                   _StatusCard(booking: b),
                   const SizedBox(height: 12),
                   for (final event in b.events) _EventRow(event: event),
-                  if (b.pending != null) ...[const SizedBox(height: 12), _PendingCard(controller: c)],
+                  if (c.waiting) const _TypingBubble() else if (b.pending != null) ...[const SizedBox(height: 12), _PendingCard(controller: c)],
                 ],
               ),
             ),
@@ -98,7 +107,16 @@ class _BookingViewState extends State<BookingFlowView> with WidgetsBindingObserv
                   child: TextButton.icon(onPressed: c.busy ? null : c.cancel, icon: const Icon(Icons.close, size: 16), label: const Text('取消這筆訂位')),
                 ),
               ),
-            _Composer(controller: _text, busy: c.busy || c.running, onSend: _send),
+            // 已結束的訂位只能查看,不能再修改條件
+            if (b.status.active)
+              _Composer(controller: _text, busy: c.busy || c.running, onSend: _send)
+            else
+              Container(
+                width: double.infinity,
+                color: Colors.white,
+                padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
+                child: Text('這筆訂位已結束,只能查看。要再訂一次請在聊天中說「幫我訂…」。', style: TextStyle(color: Colors.grey.shade600)),
+              ),
           ],
         );
       },
@@ -120,6 +138,8 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = booking.result;
     final plan = booking.confirmedPlan ?? booking.plan;
+    // 已送出過(成功 / 結果不明 / 失敗):顯示到店或打電話確認時需要的資訊
+    if (booking.confirmedPlan != null && !booking.status.active) return _ResultCard(booking: booking, plan: booking.confirmedPlan!);
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -128,7 +148,10 @@ class _StatusCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(booking.summary.isEmpty ? '正在整理訂位需求' : booking.summary, style: const TextStyle(fontWeight: FontWeight.w700)),
-            if (plan != null) ...[const SizedBox(height: 8), Text('${plan.restaurant.name} · ${plan.date} ${plan.time} · ${plan.partySize} 位')],
+            if (plan != null) ...[
+              const SizedBox(height: 8),
+              Text('${plan.restaurant.name} · ${formatBookingDate(plan.date)} ${plan.time} · ${plan.partySize} 位'),
+            ],
             if (booking.status == BookingStatus.executing || booking.status == BookingStatus.confirmed) ...[
               const SizedBox(height: 8),
               const Row(
@@ -152,6 +175,110 @@ class _StatusCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 已送出訂位的結果卡:訂位編號、時間人數、店家聯絡方式、用哪個姓名 / 電話訂的
+class _ResultCard extends StatelessWidget {
+  const _ResultCard({required this.booking, required this.plan});
+  final BookingView booking;
+  final BookingPlan plan;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = booking.result;
+    final (Color color, IconData icon, String headline) = switch (booking.status) {
+      BookingStatus.succeeded => (Colors.green.shade700, Icons.event_available, '訂位成功'),
+      BookingStatus.unknown => (Colors.red.shade700, Icons.help_outline, '結果不明'),
+      BookingStatus.failed => (Colors.red.shade700, Icons.event_busy, '沒有訂成'),
+      _ => (Colors.grey.shade700, Icons.info_outline, booking.status.text),
+    };
+    final rs = plan.restaurant;
+    final contact = [plan.contact['name'], plan.contact['phone'], plan.contact['email']].whereType<String>().where((v) => v.isNotEmpty).join(' / ');
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  headline,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ],
+            ),
+            if (booking.status == BookingStatus.succeeded && r?.confirmationNo != null) ...[
+              const SizedBox(height: 10),
+              _Line(label: '訂位編號', value: r!.confirmationNo!, copyable: true),
+            ],
+            if (booking.status == BookingStatus.unknown) ...[
+              const SizedBox(height: 8),
+              Text(
+                rs.phone == null ? '系統沒能確認有沒有訂成,請直接聯絡店家確認。為避免重複訂位,系統不會自動重送。' : '系統沒能確認有沒有訂成,請撥 ${rs.phone} 向店家確認。為避免重複訂位,系統不會自動重送。',
+                style: TextStyle(color: Colors.red.shade700, height: 1.4),
+              ),
+            ],
+            if (booking.status == BookingStatus.failed && r?.message != null) ...[
+              const SizedBox(height: 8),
+              Text(r!.message!, style: TextStyle(color: Colors.red.shade700, height: 1.4)),
+            ],
+            const SizedBox(height: 10),
+            _Line(label: '餐廳', value: rs.name),
+            _Line(label: '時間', value: '${formatBookingDate(plan.date)} ${plan.time} · ${plan.partySize} 位'),
+            if (rs.address.isNotEmpty) _Line(label: '地址', value: rs.address),
+            if (rs.phone != null) _Line(label: '店家電話', value: rs.phone!, copyable: true),
+            if (contact.isNotEmpty) _Line(label: '訂位人', value: contact),
+            for (final e in plan.extra.entries) _Line(label: _extraLabel(e.key), value: e.value),
+            if (plan.notes != null && plan.notes!.isNotEmpty) _Line(label: '備註', value: plan.notes!),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _extraLabel(String key) => switch (key) {
+  'title' => '稱謂',
+  'purpose' => '用餐目的',
+  'seat_pref' => '座位偏好',
+  _ => key,
+};
+
+class _Line extends StatelessWidget {
+  const _Line({required this.label, required this.value, this.copyable = false});
+  final String label;
+  final String value;
+  final bool copyable;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label, style: TextStyle(color: Colors.grey.shade600, height: 1.6)),
+        ),
+        Expanded(child: SelectableText(value, style: const TextStyle(height: 1.6))),
+        if (copyable)
+          IconButton(
+            tooltip: '複製',
+            visualDensity: VisualDensity.compact,
+            iconSize: 16,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: value));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已複製$label')));
+            },
+            icon: const Icon(Icons.copy),
+          ),
+      ],
+    ),
+  );
 }
 
 class _EventRow extends StatelessWidget {
@@ -183,6 +310,32 @@ class _EventRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 後端處理中的提示氣泡(轉圈 + 文字),避免使用者以為沒反應
+class _TypingBubble extends StatelessWidget {
+  const _TypingBubble();
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Container(
+      margin: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE4E7EC)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+          Text('處理中，請稍候…', style: TextStyle(color: Colors.grey.shade700)),
+        ],
+      ),
+    ),
+  );
 }
 
 class _PendingCard extends StatelessWidget {
@@ -273,67 +426,75 @@ class _TimeChoices extends StatelessWidget {
   );
 }
 
-class _SlotsForm extends StatefulWidget {
+/// 補齊訂位條件:後端一次只問一項(人數 → 日期),全部用選的,不用打字。
+/// 時段由後端查店家後以 choose_time 回傳。
+class _SlotsForm extends StatelessWidget {
   const _SlotsForm({required this.controller, required this.fields});
   final BookingController controller;
   final List<String> fields;
-  @override
-  State<_SlotsForm> createState() => _SlotsFormState();
-}
 
-class _SlotsFormState extends State<_SlotsForm> {
-  final date = TextEditingController();
-  final time = TextEditingController();
-  final party = TextEditingController();
+  static const _maxParty = 8;
+  static const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+
+  static String _ymd(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
   @override
-  void dispose() {
-    date.dispose();
-    time.dispose();
-    party.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final days = [for (var i = 0; i < 14; i++) DateTime(today.year, today.month, today.day + i)];
+    final busy = controller.busy;
+    final askParty = fields.contains('party_size');
+    final askDate = fields.contains('date');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(askParty ? '選擇人數' : '選擇日期', style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        if (askParty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var n = 1; n <= _maxParty; n++)
+                OutlinedButton(
+                  onPressed: busy ? null : () => controller.submitSlots(partySize: n),
+                  child: Text('$n 位'),
+                ),
+            ],
+          )
+        else if (askDate) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final d in days)
+                OutlinedButton(
+                  onPressed: busy ? null : () => controller.submitSlots(date: _ymd(d)),
+                  child: Text('${d.month}/${d.day}（${_weekdays[d.weekday - 1]}）'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: busy
+                ? null
+                : () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: days.first,
+                      firstDate: days.first,
+                      lastDate: DateTime(today.year, today.month, today.day + 180),
+                    );
+                    if (picked != null) await controller.submitSlots(date: _ymd(picked));
+                  },
+            icon: const Icon(Icons.calendar_month_outlined),
+            label: const Text('選其他日期'),
+          ),
+        ] else
+          const Text('請在下方輸入訂位條件，或按右上角重新整理。'),
+      ],
+    );
   }
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text('補齊訂位條件', style: TextStyle(fontWeight: FontWeight.w700)),
-      const SizedBox(height: 8),
-      if (widget.fields.contains('date'))
-        TextField(
-          controller: date,
-          decoration: const InputDecoration(labelText: '日期', hintText: 'YYYY-MM-DD'),
-        ),
-      if (widget.fields.contains('time'))
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: TextField(
-            controller: time,
-            decoration: const InputDecoration(labelText: '時間', hintText: 'HH:MM，例如 19:00'),
-          ),
-        ),
-      if (widget.fields.contains('party_size'))
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: TextField(
-            controller: party,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: '人數'),
-          ),
-        ),
-      const SizedBox(height: 12),
-      FilledButton(
-        onPressed: widget.controller.busy
-            ? null
-            : () => widget.controller.submitSlots(
-                date: date.text.trim().isEmpty ? null : date.text.trim(),
-                time: time.text.trim().isEmpty ? null : time.text.trim(),
-                partySize: int.tryParse(party.text),
-              ),
-        child: const Text('繼續'),
-      ),
-    ],
-  );
 }
 
 class _InfoForm extends StatefulWidget {

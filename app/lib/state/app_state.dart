@@ -40,7 +40,9 @@ class AppState extends ChangeNotifier {
   ChatController? chat;
   late final BookingApi bookingApi = BookingApi(api);
   BookingController? booking;
-  List<BookingSummary> activeBookings = [];
+  /// 側邊欄的訂位分組。每組最多顯示 [bookingSidebarLimit] 筆,多抓一筆用來判斷「還有更多」。
+  Map<BookingListView, List<BookingSummary>> bookingGroups = {};
+  static const bookingSidebarLimit = 3;
   bool showingBooking = false;
 
   bool bootstrapping = true;
@@ -142,7 +144,7 @@ class AppState extends ChangeNotifier {
     booking?.dispose();
     chat = null;
     booking = null;
-    activeBookings = [];
+    bookingGroups = {};
     showingBooking = false;
     api.token = null;
     _prefs.remove('token');
@@ -205,7 +207,7 @@ class AppState extends ChangeNotifier {
     };
     balance = Balance.fromJson(results[2]);
     // 訂位入口失敗不應阻斷既有聊天首頁;使用者稍後開啟或重新整理會再讀。
-    activeBookings = await bookingApi.active().catchError((_) => <BookingSummary>[]);
+    await _loadBookingGroups();
   }
 
   Future<void> refreshBalance() async {
@@ -249,20 +251,34 @@ class AppState extends ChangeNotifier {
 
   void _showBooking(BookingView initial) {
     booking?.dispose();
-    booking = BookingController(api: bookingApi, initial: initial, onBalance: refreshBalance, onChanged: () => _refreshActiveBookings());
+    booking = BookingController(api: bookingApi, initial: initial, onBalance: refreshBalance, onChanged: () => _refreshBookingGroups());
     showingBooking = true;
-    _refreshActiveBookings();
+    _refreshBookingGroups();
     notifyListeners();
   }
 
-  Future<void> _refreshActiveBookings() async {
-    try {
-      activeBookings = await bookingApi.active();
-      if (!showingBooking) notifyListeners();
-    } on ApiException {
-      /* 不影響既有畫面 */
-    }
+  static const _sidebarGroups = [BookingListView.attention, BookingListView.upcoming, BookingListView.inProgress];
+
+  /// 三組各自讀取;某一組失敗就保留它原本的內容,不影響其他組與聊天畫面。
+  Future<void> _loadBookingGroups() async {
+    final pages = await Future.wait(
+      _sidebarGroups.map((v) => bookingApi.list(v, limit: bookingSidebarLimit + 1).then<BookingPage?>((p) => p).catchError((_) => null)),
+    );
+    bookingGroups = {
+      for (var i = 0; i < _sidebarGroups.length; i++) _sidebarGroups[i]: pages[i]?.items ?? bookingGroups[_sidebarGroups[i]] ?? const [],
+    };
   }
+
+  Future<void> refreshBookingGroups() => _refreshBookingGroups();
+
+  Future<void> _refreshBookingGroups() async {
+    await _loadBookingGroups();
+    notifyListeners();
+  }
+
+  /// 訂位紀錄頁:已結束的訂位,依結束時間新到舊
+  Future<BookingPage> loadBookingHistory({String? result, bool includeDrafts = false, String? before}) =>
+      bookingApi.list(BookingListView.history, result: result, includeDrafts: includeDrafts, before: before);
 
   // ------------------------------------------------------------------ 選角色 → 開啟對話
   Future<void> openCharacter(Character c) async {

@@ -4,6 +4,8 @@ import '../api/api_client.dart';
 import '../models/models.dart';
 import '../models/booking_models.dart';
 import '../state/app_state.dart';
+import 'booking_history_dialog.dart';
+import 'booking_tile.dart';
 import 'booking_view.dart';
 import 'chat_view.dart';
 import 'ledger_dialog.dart';
@@ -111,35 +113,92 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 20, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('進行中的訂位', style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-          if (state.activeBookings.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 16, 12),
-              child: Text('在聊天中說「幫我訂餐廳」即可開始', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-            )
-          else
-            for (final booking in state.activeBookings) _BookingTile(state: state, booking: booking),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 16, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('角色', style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
+          // 訂位分組與角色放在同一個捲動區:訂位多的時候不會把角色清單擠出畫面
           Expanded(
             child: ListView(
-              children: [for (final c in state.characters) _CharacterTile(state: state, character: c)],
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 8, 2),
+                  child: Row(
+                    children: [
+                      const Text('訂位', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: () => showBookingHistory(context, state),
+                        icon: const Icon(Icons.history, size: 18),
+                        label: const Text('訂位紀錄'),
+                      ),
+                    ],
+                  ),
+                ),
+                ..._bookingSections(context),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 16, 16, 8),
+                  child: Text('角色', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                for (final c in state.characters) _CharacterTile(state: state, character: c),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 依「接下來要做什麼」分組:需要你處理 → 即將到來 → 進行中。空的組不顯示;每組最多 3 筆,更多的到訂位紀錄看。
+  List<Widget> _bookingSections(BuildContext context) {
+    const sections = [
+      (BookingListView.attention, '需要你處理', 'unknown'),
+      (BookingListView.upcoming, '即將到來', 'succeeded'),
+      (BookingListView.inProgress, '進行中', null),
+    ];
+    final out = <Widget>[];
+    for (final (view, label, historyFilter) in sections) {
+      final items = state.bookingGroups[view] ?? const <BookingSummary>[];
+      if (items.isEmpty) continue;
+      final more = items.length > AppState.bookingSidebarLimit;
+      out.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 16, 2),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      );
+      for (final b in items.take(AppState.bookingSidebarLimit)) {
+        out.add(BookingTile(booking: b, selected: state.showingBooking && state.booking?.booking.id == b.id, onTap: () => state.openBooking(b.id)));
+      }
+      if (more) {
+        out.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 70),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => showBookingHistory(context, state, result: historyFilter),
+                child: const Text('還有更多…'),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    if (out.isEmpty) {
+      out.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 16, 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('在聊天中說「幫我訂餐廳」即可開始', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+          ),
+        ),
+      );
+    }
+    return out;
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
@@ -186,61 +245,6 @@ class _Sidebar extends StatelessWidget {
     }
   }
 }
-
-class _BookingTile extends StatelessWidget {
-  const _BookingTile({required this.state, required this.booking});
-
-  final AppState state;
-  final BookingSummary booking;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = state.showingBooking && state.booking?.booking.id == booking.id;
-    return Material(
-      color: selected ? const Color(0xFFEFEAFF) : Colors.transparent,
-      child: InkWell(
-        onTap: () => state.openBooking(booking.id),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: const Color(0xFFFFF1E5), borderRadius: BorderRadius.circular(13)),
-                child: const Icon(Icons.restaurant_menu, color: Color(0xFFC45D00)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      booking.summary.isEmpty ? '訂位代辦' : booking.summary,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(booking.status.text, style: TextStyle(color: _bookingStatusColor(booking.status), fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-Color _bookingStatusColor(BookingStatus status) => switch (status) {
-  BookingStatus.succeeded => Colors.green.shade700,
-  BookingStatus.failed || BookingStatus.unknown || BookingStatus.expired => Colors.red.shade700,
-  BookingStatus.confirmed || BookingStatus.executing => Colors.orange.shade800,
-  _ => Colors.grey.shade600,
-};
 
 class _CharacterTile extends StatelessWidget {
   const _CharacterTile({required this.state, required this.character});

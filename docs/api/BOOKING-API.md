@@ -58,12 +58,16 @@ stateDiagram-v2
        ├─ pending.kind = choose_restaurant → 顯示候選店,使用者點選 → PATCH /bookings/{id}/slots {restaurant_id}
        ├─ pending.kind = provide_info      → 顯示表單(依 fields),送出     → PATCH /bookings/{id}/slots {contact, extra}
        ├─ pending.kind = choose_time       → 顯示可選時段                   → PATCH /bookings/{id}/slots {time}
-       ├─ pending.kind = provide_slots     → 問日期 / 時間 / 人數            → PATCH 或 POST .../messages
+       ├─ pending.kind = provide_slots     → 一次只問一項,依序:人數 → 日期(顯示選項)  → PATCH /bookings/{id}/slots {party_size 或 date}
+       │     └─ 人數、日期齊了 → pending.kind = choose_time(店家可訂時段)→ PATCH .../slots {time}
        └─ status = awaiting_confirmation   → 顯示方案(plan)與倒數(plan.expires_at)
              └─ 使用者按確認 → POST /bookings/{id}/confirm {plan_hash: plan.hash}   → 202
                    └─ 每 2~3 秒 GET /bookings/{id},直到 status 是 succeeded / failed / unknown
 
-使用者離開 App 再回來:GET /bookings?status=active 找進行中的需求 → GET /bookings/{id} 還原畫面
+使用者離開 App 再回來(含登出再登入):
+  GET /bookings?view=attention|upcoming|in_progress  → 側邊欄三組(需要處理 / 即將到來 / 進行中)
+  GET /bookings?view=history                         → 訂位紀錄(已結束的全部,可篩選、翻頁)
+  → GET /bookings/{id} 還原畫面或查看結果
 ```
 
 - **按鈕 / 表單用 `PATCH .../slots`(結構化輸入,不經過 AI,不扣點)**;使用者打字用 `POST .../messages`(經過 AI 理解,扣點)。
@@ -132,11 +136,15 @@ stateDiagram-v2
 
 ### `GET /v1/bookings`
 
-列出我的訂位需求(最新更新的在前,進行中的排在最前面)。
+列出我的訂位需求,依「使用者接下來要做什麼」分組。用餐日以台北日期比較。
 
 | query | 說明 |
 |---|---|
-| `status` | `active`(只列進行中:補資料 / 待確認 / 送出中)或 `all`(預設) |
+| `view` | `attention`:需要你處理——結果不明且用餐日還沒過(請向店家確認)、等你確認且未過期的方案。結果不明排前面<br>`upcoming`:即將到來——訂位成功且用餐日 ≥ 今天,依用餐日期時間排序<br>`in_progress`:進行中——補資料中、已確認、正在訂位<br>`history`:訂位紀錄——所有已結束的(成功 / 失敗 / 結果不明 / 取消 / 過期),依結束時間新到舊,可翻頁<br>`active` / `all`:舊的查法,保留相容(進行中含待確認 / 全部;進行中排最前) |
+| `status` | 舊參數,等同 `view=active` / `view=all`。兩個都沒給時是 `all` |
+| `result` | 只用於 `history`:`succeeded` / `failed` / `unknown` / `cancelled` / `expired` |
+| `include_drafts` | 只用於 `history`:`true` 才列出「沒確認過方案就取消 / 過期」的草稿(預設不列) |
+| `before` | 只用於 `history`:上一頁回應的 `next_before`(不透明字串);無效時 `400 INVALID_REQUEST` |
 | `limit` | 1–100,預設 30 |
 
 ```json
@@ -148,14 +156,22 @@ stateDiagram-v2
       "summary": "夜行居酒屋 · 2026-11-13 20:00 · 4 位",
       "pending_kind": null,
       "expires_at": null,
+      "restaurant": { "name": "夜行居酒屋", "phone": "02-2700-0003", "address": "台北市大安區…" },
+      "date": "2026-11-13",
+      "time": "20:00",
+      "party_size": 4,
       "result": { "ok": true, "confirmation_no": "WF-D15HPE" },
-      "updated_at": "2026-11-08T08:05:21.307Z"
+      "updated_at": "2026-11-08T08:05:21.307Z",
+      "finished_at": "2026-11-08T08:05:21.307Z"
     }
-  ]
+  ],
+  "next_before": null
 }
 ```
 
-`expires_at` 只有 `awaiting_confirmation` 才有值(確認期限,用來顯示倒數)。
+- `expires_at` 只有 `awaiting_confirmation` 才有值(確認期限,用來顯示倒數)。
+- `restaurant` / `date` / `time` / `party_size` 取自已確認的方案,沒有的話取目前的方案或條件;還沒選店時 `restaurant` 是 `null`。
+- `next_before` 只有 `history` 會給;`null` 表示沒有更多。
 
 ### `GET /v1/bookings/{id}`
 
@@ -277,8 +293,8 @@ stateDiagram-v2
 |---|---|---|---|
 | `provide_request` | — | 問使用者想訂哪一家,或地區與料理類型 | `messages` |
 | `choose_restaurant` | `options[]` | 候選店家(名稱、評分、地址、電話、訂位管道) | `slots.restaurant_id`,或 `messages`(「第二家」「櫻花亭」) |
-| `provide_slots` | `fields[]`:`date` / `time` / `party_size` | 缺的項目 | `slots` 或 `messages` |
-| `choose_time` | `options[]`(可訂的時段) | 時段選擇 | `slots.time` |
+| `provide_slots` | `fields[]`:`party_size` 或 `date`(一次只有一項,順序為人數 → 日期) | 人數選項 / 日期選項,讓使用者點選 | `slots` 或 `messages` |
+| `choose_time` | `options[]`(可訂的時段) | 時段選擇(人數、日期都確定後才出現) | `slots.time` |
 | `provide_info` | `fields[]`:`key` / `label` / `type`(`text` `tel` `email` `select`) / `options` | 表單,**欄位由店家決定**(有的只要電話,有的還要 email,有的多一個下拉選單) | `slots.contact` / `slots.extra` |
 | `confirm_plan` | — | 方案 + 倒數 + 確認按鈕 | `confirm` |
 

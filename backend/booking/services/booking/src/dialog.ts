@@ -203,17 +203,15 @@ export async function advance(
   const r = s.restaurant!;
 
   // 2) 日期 / 時間 / 人數
-  const missing = (['date', 'time', 'party_size'] as const).filter((k) => s[k] === undefined);
-  if (missing.length > 0) {
-    const names = { date: '日期', time: '時間', party_size: '人數' };
-    return ask({
-      pending: { kind: 'provide_slots', fields: [...missing] },
-      message: `好的,訂「${r.name}」。請告訴我${missing.map((k) => names[k]).join('、')}。`,
-    });
+  // 依序一次問一項:人數 → 日期 → 時段(時段要等人數與日期都有,才查得到店家可訂的時間,由 choose_time 讓使用者選)
+  if (s.party_size === undefined) {
+    return ask({ pending: { kind: 'provide_slots', fields: ['party_size'] }, message: `好的,訂「${r.name}」。請問幾位?` });
   }
-  const date = s.date!;
-  const time = s.time!;
-  const party = s.party_size!;
+  if (s.date === undefined) {
+    return ask({ pending: { kind: 'provide_slots', fields: ['date'] }, message: `「${r.name}」${s.party_size} 位。請選擇用餐日期。` });
+  }
+  const date = s.date;
+  const party = s.party_size;
 
   // 3) 問店家:這天能不能訂、有哪些時段、要填哪些資料
   const channel = ports.channels[r.option.channel];
@@ -240,6 +238,13 @@ export async function advance(
       message: `「${r.name}」單筆訂位最多 ${insp.maxParty} 位。要改成幾位?`,
     });
   }
+  if (s.time === undefined) {
+    return ask({
+      pending: { kind: 'choose_time', options: insp.times },
+      message: `「${r.name}」${fmtDay(date)} ${party} 位。請選擇用餐時段。`,
+    });
+  }
+  const time = s.time;
   if (!insp.times.includes(time)) {
     delete s.time;
     return ask({

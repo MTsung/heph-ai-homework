@@ -18,7 +18,7 @@ import { Nlu } from './nlu';
 import { BookingReaper } from './reaper';
 import { Runner } from './runner';
 import { BookingSearch } from './search';
-import { BookingService, confirmBody, createBody, messageBody, slotsBody, toView } from './service';
+import { BookingService, HISTORY_RESULTS, LIST_VIEWS, confirmBody, createBody, decodeCursor, messageBody, slotsBody, toView } from './service';
 import type { BookingRow } from './types';
 
 const uuid = z.string().uuid();
@@ -101,12 +101,27 @@ async function main(): Promise<void> {
     const { userId } = requireUser(c);
     const q = parse(
       z.object({
-        status: z.enum(['active', 'all']).default('all'),
+        view: z.enum(LIST_VIEWS).optional(),
+        // 舊參數(相容):status=active|all
+        status: z.enum(['active', 'all']).optional(),
+        result: z.enum(HISTORY_RESULTS).optional(),
+        include_drafts: z.enum(['true', 'false']).default('false'),
+        before: z.string().max(200).optional(),
         limit: z.coerce.number().int().min(1).max(100).default(30),
       }),
       c.req.query(),
     );
-    return c.json(await svc.list(userId, { activeOnly: q.status === 'active', limit: q.limit }));
+    const before = q.before ? decodeCursor(q.before) : undefined;
+    if (before === null) throw Errors.badRequest('before 游標無效');
+    return c.json(
+      await svc.list(userId, {
+        view: q.view ?? q.status ?? 'all',
+        limit: q.limit,
+        result: q.result,
+        includeDrafts: q.include_drafts === 'true',
+        before,
+      }),
+    );
   });
 
   app.get('/bookings/:id', async (c) => c.json(await svc.get(requireUser(c).userId, parse(uuid, c.req.param('id')))));
