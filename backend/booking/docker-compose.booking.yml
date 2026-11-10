@@ -1,4 +1,4 @@
-# 訂位代辦(AI 代辦)擴充:booking、booking-sim、browser-agent。
+# 訂位代辦(AI 代辦)擴充:booking、browser-agent。
 # 由根目錄的 docker-compose.yml 以 `include` 載入,與 Chat APP 共用同一個專案、網路、PostgreSQL 與 Redis。
 # 本檔內的相對路徑以 backend/booking/ 為基準;變數由根目錄 .env 提供(見根目錄 include 的 env_file)。
 # 設計見 docs/booking/DECISIONS.md
@@ -38,7 +38,6 @@ services:
       SERVICE: booking
       PORT: "3005"
       DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/booking
-      SIM_URL: http://booking-sim:9100 # 目前的「Google 搜尋 / 餐廳網頁 / 訂位平台」都是模擬器
       # 真實瀏覽器目標:享樂地圖(JoyMap)測試店家。worker 只有收到已確認方案才會開瀏覽器。
       BROWSER_BOOKING_URL: ${BROWSER_BOOKING_URL:-https://www.joymap.tw/store/jump888}
       # --- 需求理解:LLM_PROVIDERS 設成真實模型才會用 LLM;預設 mock → 用規則解析,不需要任何金鑰 ---
@@ -72,29 +71,10 @@ services:
       redis-state: { condition: service_healthy }
       redis-cache: { condition: service_healthy }
       billing: { condition: service_healthy }
-      booking-sim: { condition: service_healthy }
       browser-agent: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3005/healthz"]
       interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # 訂位世界的模擬器:假的 Google 搜尋、各家餐廳的訂位網頁(欄位 / 必填各不同)、合作訂位平台 API,
-  # 並內建客滿 / 處理很慢 / 成功了但回應沒回來 / 平台第一次回 503 等故障行為。見 services/booking-sim/
-  booking-sim:
-    <<: *bun
-    environment:
-      SERVICE: booking-sim
-      SERVICE_ROOT: booking/services
-      PORT: "9100"
-      SIM_PUBLIC_URL: http://booking-sim:9100
-      SIM_SUBMIT_DELAY_MS: ${SIM_SUBMIT_DELAY_MS:-2500}
-    ports:
-      - "127.0.0.1:9190:9100" # 只綁本機,方便手動看 /__debug/reservations(9100 常被 Flutter 開發伺服器佔用,所以對外用 9190)
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/healthz"]
-      interval: 3s
       timeout: 3s
       retries: 10
 

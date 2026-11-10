@@ -257,7 +257,6 @@ services:
     environment:
       <<: *bun-env
       GATEWAY_URL: http://gateway:8080
-      SIM_URL: http://booking-sim:9100 # 訂位擴充的冒煙測試:bun booking/scripts/booking-smoke.ts
       BOOKING_DATABASE_URL: postgres://chatapp:${POSTGRES_PASSWORD:-chatapp}@postgres:5432/booking
     depends_on:
       gateway: { condition: service_healthy }

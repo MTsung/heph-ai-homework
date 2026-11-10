@@ -13,9 +13,7 @@
     "dev:billing": "bun --watch services/billing/src/main.ts",
     "dev:admin": "bun --watch services/admin/src/main.ts",
     "dev:booking": "bun --watch booking/services/booking/src/main.ts",
-    "dev:booking-sim": "bun --watch booking/services/booking-sim/src/main.ts",
     "smoke": "bun scripts/smoke.ts",
-    "smoke:booking": "bun booking/scripts/booking-smoke.ts",
     "loadtest": "bun scripts/loadtest.ts"
   },
   "dependencies": {

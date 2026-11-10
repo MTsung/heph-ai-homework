@@ -29,8 +29,6 @@ export const TERMINAL: BookingStatus[] = ['succeeded', 'failed', 'unknown', 'can
 // ============================================================================ 訂位管道
 /** 搜尋後得知這家店「怎麼訂」。這是內部資訊,存在需求裡,方案確認時會連同目標一起凍結 */
 export type BookingOption =
-  | { channel: 'web_form'; url: string }
-  | { channel: 'platform_api'; platform: string; restaurantId: string }
   /** 由 browser-agent 操作真實訂位網站。目前只支援已授權的享樂地圖(JoyMap)測試店家 */
   | { channel: 'browser_agent'; site: 'joymap'; url: string; restaurantId: string };
 
@@ -194,9 +192,9 @@ export type SubmitOutcome =
 
 export interface BookingChannel {
   readonly id: BookingOption['channel'];
-  /** 同一個冪等鍵重送是否安全。web_form 沒有這種保證,所以結果不明時不能自動重送(會重複訂位) */
+  /** 同一個冪等鍵重送是否安全。browser_agent 沒有這種保證,所以結果不明時不能自動重送(會重複訂位) */
   readonly idempotent: boolean;
-  /** 是否受「同時執行數」上限(例如模擬器上操作網頁很吃資源) */
+  /** 是否受「同時執行數」上限(例如瀏覽器操作很吃資源) */
   readonly limited: boolean;
   /** 唯讀:看這家店這天這個人數能不能訂、有哪些時段、要填什麼欄位。失敗時丟 ChannelError */
   inspect(option: BookingOption, date: string, party: number, signal: AbortSignal): Promise<Inspection>;
