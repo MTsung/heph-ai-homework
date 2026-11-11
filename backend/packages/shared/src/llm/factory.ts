@@ -63,7 +63,7 @@ const BUILDERS: Record<string, Builder> = {
 
   groq: compat('groq', {
     baseUrl: 'https://api.groq.com/openai/v1',
-    model: 'llama-3.1-8b-instant',
+    model: 'qwen/qwen3.8-27b',
     maxTokensParam: 'max_completion_tokens',
     includeUsage: true,
     keyRequired: true,
