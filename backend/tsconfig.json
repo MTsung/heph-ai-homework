@@ -13,5 +13,6 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["shared/**/*.ts", "services/**/*.ts", "scripts/**/*.ts", "booking/**/*.ts"]
+  "include": ["packages/**/*.ts", "services/**/*.ts", "scripts/**/*.ts", "booking/**/*.ts"],
+  "exclude": ["**/node_modules"]
 }

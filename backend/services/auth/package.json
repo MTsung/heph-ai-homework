@@ -1,0 +1,20 @@
+{
+  "name": "@chat-app/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "帳號、登入與單一裝置 session",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@chat-app/shared": "workspace:*",
+    "ioredis": "^5.4.1",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}

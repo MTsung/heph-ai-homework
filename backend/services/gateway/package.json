@@ -1,0 +1,15 @@
+{
+  "name": "@chat-app/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "唯一對外入口:JWT + 單一裝置驗證、限流、轉發(含 SSE)",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@chat-app/shared": "workspace:*",
+    "ioredis": "^5.4.1"
+  }
+}

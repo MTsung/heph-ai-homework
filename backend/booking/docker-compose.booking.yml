@@ -59,7 +59,7 @@ services:
       LLM_STALL_MS: ${LLM_STALL_MS:-}
       LLM_BREAKER_FAILURES: ${LLM_BREAKER_FAILURES:-}
       LLM_BREAKER_COOLDOWN_MS: ${LLM_BREAKER_COOLDOWN_MS:-}
-      # --- 產品規則(空白 = 程式內預設值,見 backend/booking/services/booking/src/deps.ts) ---
+      # --- 產品規則(空白 = 程式內預設值,見 backend/booking/services/booking/src/config.ts) ---
       PLAN_TTL_SEC: ${PLAN_TTL_SEC:-}
       COST_TURN: ${COST_TURN:-}
       COST_BOOK: ${COST_BOOK:-}

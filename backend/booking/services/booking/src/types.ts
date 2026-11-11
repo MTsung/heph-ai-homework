@@ -23,6 +23,10 @@ export type BookingStatus =
   | 'expired';
 
 export const ACTIVE_DRAFT: BookingStatus[] = ['collecting', 'awaiting_confirmation'];
+
+/** 等待確認但已過期(背景任務還沒把狀態落地前,讀取時就要當作過期) */
+export const isExpired = (r: { status: BookingStatus; expires_at: Date | null }) =>
+  r.status === 'awaiting_confirmation' && !!r.expires_at && new Date(r.expires_at).getTime() <= Date.now();
 export const IN_PROGRESS: BookingStatus[] = ['confirmed', 'executing'];
 export const TERMINAL: BookingStatus[] = ['succeeded', 'failed', 'unknown', 'cancelled', 'expired'];
 

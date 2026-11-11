@@ -8,12 +8,12 @@
 // 連線:DATABASE_URL_<服務大寫> > 用 PG_HOST(預設 postgres)、POSTGRES_USER(預設 chatapp)、POSTGRES_PASSWORD(預設 chatapp)組成 postgres://…/<服務>
 // 倒退在 NODE_ENV=production 預設拒絕,要設 ALLOW_MIGRATE_DOWN=1。
 // 注意:要用「含有這個 migration 的版本」的 image 執行,舊版本的程式裡沒有它的 down。release.sh migrate 會處理。
-import { createPool, migrateDown, migrationStatus, type Migration } from '../shared/db';
-import { migrations as auth } from '../services/auth/src/migrations';
-import { migrations as billing } from '../services/billing/src/migrations';
-import { migrations as character } from '../services/character/src/migrations';
-import { migrations as chat } from '../services/chat/src/migrations';
-import { migrations as booking } from '../booking/services/booking/src/migrations';
+import { createPool, migrateDown, migrationStatus, type Migration } from '@chat-app/shared/db';
+import { migrations as auth } from '../services/auth/src/db/migrations';
+import { migrations as billing } from '../services/billing/src/db/migrations';
+import { migrations as character } from '../services/character/src/db/migrations';
+import { migrations as chat } from '../services/chat/src/db/migrations';
+import { migrations as booking } from '../booking/services/booking/src/db/migrations';
 
 const SERVICES: Record<string, Migration[]> = { auth, chat, billing, character, booking };
 
