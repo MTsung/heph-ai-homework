@@ -7,14 +7,43 @@
 
 ## 系統架構
 
+```mermaid
+flowchart LR
+    APP["Flutter macOS"]
+    WEB["後台網頁"]
+
+    GW["gateway :8080"]
+    ADMIN["admin :8090<br/>(僅本機)"]
+    AUTH["auth"]
+    CHAR["character"]
+    CHAT["chat"]
+    BOOK["booking"]
+    BA["browser-agent"]
+    BILL["billing"]
+
+    subgraph Data["資料層"]
+        PG[("PostgreSQL<br/>每個服務一個資料庫")]
+        RS[("redis-state")]
+        RC[("redis-cache")]
+    end
+
+    APP -- "HTTPS / SSE" --> GW
+    WEB --> ADMIN
+    GW --> AUTH
+    GW --> CHAR
+    GW --> CHAT
+    GW --> BOOK
+    GW --> BILL
+    BOOK --> BA
+
+    ADMIN -. "/internal" .-> AUTH
+    ADMIN -.-> CHAR
+    ADMIN -.-> CHAT
+    ADMIN -.-> BOOK
+    ADMIN -.-> BILL
 ```
- Flutter macOS ──HTTPS/SSE──▶ gateway :8080 ──┬─▶ auth
- 後台網頁 :8090(僅本機)                       ├─▶ character
-                                              ├─▶ chat
-                                              ├─▶ booking ──▶ browser-agent
-                                              └─▶ billing
-                       PostgreSQL(每個服務一個資料庫)   redis-state / redis-cache
-```
+
+更完整的服務間呼叫與循序圖見 [`docs/ARCHITECTURE-DIAGRAMS.md`](docs/ARCHITECTURE-DIAGRAMS.md)。
 
 ### 服務說明
 
@@ -26,7 +55,7 @@
 | `chat` | 對話、訊息、串流生成、LLM 供應商備援 |
 | `billing` | 點數預扣 → 結算/釋放、帳本 |
 | `booking` | AI 代辦:需求理解、方案、確認、送出、補償 |
-| `browser-agent` | Python browser-use,操作享樂地圖測試店家訂位頁 |
+| `browser-agent` | Python browser-use,操作享樂地圖測試店家訂位頁(只支援 Gemini) |
 | `admin` | 後台 API + 單頁網頁(無權限控管,只綁 127.0.0.1) |
 
 ### 技術棧
@@ -35,7 +64,7 @@
 - **客戶端**:Flutter(macOS)
 - **資料庫**:PostgreSQL(database-per-service)
 - **快取 / 狀態**:Redis × 2(`redis-state` 不淘汰、`redis-cache` LRU)
-- **AI**:Gemini、Groq、OpenAI、Ollama、mock(可設定主要 + 備援)
+- **AI**:Gemini、Groq、OpenAI、Ollama、mock(可設定主要 + 備援);browser-agent 只支援 Gemini
 - **容器化**:Docker、Docker Compose
 
 ---
@@ -46,7 +75,7 @@
 - Flutter(跑客戶端)
 - Bun(只有本機型別檢查才需要)
 
-不需要任何 API key,預設使用內建的 mock 模型。
+不需要任何 API key,預設使用內建的 mock 模型。browser-agent 例外,需要 `GEMINI_API_KEY`。
 
 ---
 

@@ -1,6 +1,6 @@
 # 後端架構圖與循序圖
 
-依 README 整理。App 與後台合併為「客戶端」。
+App 與後台合併為「客戶端」。
 
 ## 系統架構圖
 
@@ -19,9 +19,9 @@ flowchart LR
         ADMIN["admin API"]
     end
 
-    LLM["LLM 供應商<br/>預設【模擬】mock,可接 Gemini / Groq"]
+    LLM["LLM 供應商<br/>預設【模擬】mock,可接 Gemini / Groq / OpenAI / Ollama"]
     PG[("PostgreSQL<br/>每服務一個 DB")]
-    RS[("redis-state<br/>session / 鎖 / 串流")]
+    RS[("redis-state<br/>session / 限流 / 鎖 / 串流 / 事件")]
     RC[("redis-cache<br/>快取 (LRU)")]
 
     Client -- "HTTPS / SSE" --> GW
@@ -37,12 +37,16 @@ flowchart LR
     BOOK --> BILL
     BOOK --> LLM
     BOOK --> BA
+    BA -- "僅 Gemini" --> LLM
+    ADMIN --> AUTH
+    ADMIN --> CHAR
     ADMIN --> CHAT
+    ADMIN --> BOOK
     ADMIN --> BILL
 
     AUTH & CHAR & CHAT & BILL & BOOK --> PG
-    GW & AUTH & CHAT & BOOK --> RS
-    CHAR --> RC
+    GW & AUTH & CHAR & CHAT & BILL & BOOK & ADMIN --> RS
+    CHAR & CHAT & BILL & ADMIN --> RC
 ```
 
 ## 循序圖 1:聊天串流(預扣 → 結算/釋放)
@@ -91,16 +95,20 @@ sequenceDiagram
     participant N as 新裝置
     participant GW as gateway
     participant A as auth
+    participant DB as PostgreSQL
     participant R as redis-state
     participant O as 舊裝置
 
     N->>GW: 登入
     GW->>A: 驗證帳密
-    A->>R: 建立新 session,取代舊 session
+    A->>DB: 建立新 session,取代舊 session
+    A->>R: 寫入 session 快取
     A-->>N: JWT
-    R-->>O: 推送「已被登出」通知
+    A->>R: 發布 evt:session
+    R-->>GW: evt:session
+    GW-->>O: SSE session_replaced
     O->>GW: 之後的請求
-    GW-->>O: 401 session 失效
+    GW-->>O: 401 SESSION_REPLACED
 ```
 
 ## 循序圖 3:AI 代辦訂位
@@ -116,10 +124,11 @@ sequenceDiagram
 
     C->>GW: POST /v1/bookings (一句話需求)
     GW->>BK: 轉發
+    BK->>B: 扣 1 點
     BK->>BK: 解析需求 (預設為規則解析,有設真實 LLM 才用 LLM)
     Note over BK,J: 使用者提到 Jump / TEST01 時,找到享樂地圖測試店家(走 browser-agent)
-    BK-->>C: pending (補聯絡資料)
-    C->>BK: PATCH slots (補聯絡資料)
+    BK-->>C: collecting (選店)
+    C->>BK: PATCH slots (選店、補聯絡資料)
     BK-->>C: 方案 + plan_hash (10 分鐘有效)
     C->>BK: POST confirm (帶 plan_hash)
     BK->>B: 預扣 3 點
@@ -137,5 +146,3 @@ sequenceDiagram
     C->>BK: GET /v1/bookings/:id 查結果
     BK-->>C: 狀態
 ```
-
-> 服務間呼叫方向(例如 admin 呼叫哪些服務、chat 是否直接呼叫 character)是依 README 架構圖推斷,未逐一對照程式碼。

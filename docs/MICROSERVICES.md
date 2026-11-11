@@ -11,6 +11,6 @@
 | billing | 點數預扣 → 結算/釋放、帳本,保證不超扣 |
 | admin | 後台 API 與單頁網頁(僅本機 :8090,無權限控管) |
 | booking | AI 代辦訂位:需求解析、方案、確認、送出與補償 |
-| browser-agent | Python browser-use agent,操作享樂地圖測試店家完成訂位 |
+| browser-agent | Python browser-use agent,操作享樂地圖測試店家完成訂位(只支援 Gemini) |
 
 共用基礎設施:PostgreSQL(每服務一個資料庫)、redis-state、redis-cache。
