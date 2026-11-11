@@ -77,7 +77,7 @@ Redis 快取 = 20 萬對話 × 13.6 KB(實測) ≈ 2.7 GB
 
 | 順序 | 觸發 | 怎麼改 |
 |---|---|---|
-| 1 水平擴充 chat / gateway | 單台約 300 新對話/秒開始劣化 | 無狀態,直接加 replica([`OPERATIONS` §4](../OPERATIONS.md)) |
+| 1 水平擴充 chat / gateway | 單台約 300 新對話/秒開始劣化 | 無狀態,直接加 replica([`OPERATIONS` §4](../OPERATIONS.md#4-水平擴充)) |
 | 2 Postgres 寫入 | 大量查詢在等 `WALWrite` | 已合併熱路徑語句、簿記更新放寬同步;再來 PgBouncer、更快的儲存、chat 與 billing 分庫。**不要全域關 `synchronous_commit`**(會丟帳) |
 | 3 messages 表過大 | 單表 > 5 億列(約第 2 年) | 以 `hash(conversation_id)` 分區;舊對話歷史搬冷儲存 |
 | 4 LLM 成本與容量 | rate limit、成本佔比 | 已有工廠 + 備援 + 斷路器;下一步:共享斷路器、全站每日 token 預算、快取相同 prompt、依角色選模型 |
@@ -102,7 +102,6 @@ Redis 快取 = 20 萬對話 × 13.6 KB(實測) ≈ 2.7 GB
 
 - **真正的瓶頸是 Postgres 的 WAL fsync**:壓測中 138 個活動查詢全在等 `LWLock:WALWrite`。我先猜錯兩次(連線池、往返次數),看了 `pg_stat_activity` 才確定。暫時關閉同步提交的實驗(非建議)讓 25% 失敗變 0,所以只對「遺失也安全」的簿記更新放寬,涉及金額與內容的寫入維持同步。
 - **壓測抓到的 bug**:預扣逾時未補償、補償失敗被靜默吞掉,功能測試都看不出來。
-- **未驗證**:沒人眼確認過 macOS App 的實際畫面與互動手感。
 
 重跑方式見 [`README`](../../README.md) 與 `backend/scripts/loadtest.ts`。
 
@@ -114,6 +113,6 @@ Redis 快取 = 20 萬對話 × 13.6 KB(實測) ≈ 2.7 GB
 | 長期記憶、儲值 / 金流、推播、內容審查 | 產品決策後 |
 | **後台權限**(目前只綁 127.0.0.1,能看對話與改點數) | **上線前必做** |
 | 刪除帳號時保留帳務(目前全刪;法遵要求時改為去識別化) | 與法務確認後 |
-| 告警系統(有 `/metrics`,但沒有接告警;`billing_state` 積壓等只能靠 SQL 查) | 上線前,見 [`OPERATIONS` §7](../OPERATIONS.md) |
+| 告警系統(有 `/metrics`,但沒有接告警;`billing_state` 積壓等只能靠 SQL 查) | 上線前,見 [`OPERATIONS` §7](../OPERATIONS.md#7-未來展望) |
 | 金絲雀發布(目前是滾動更新) | 流量變大後 |
-| 分區與歸檔 | 資料量到了(見 §5 #3) |
+| 分區與歸檔 | 資料量到了(見 [§5 #3](#5-成長時先改哪裡)) |
